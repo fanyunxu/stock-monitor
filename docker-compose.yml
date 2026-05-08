@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    container_name: stock-monitor
+    network_mode: host
+    environment:
+      - DATABASE_HOST=192.168.0.12
+      - DATABASE_PORT=35432
+      - DATABASE_NAME=stock_monitor
+      - DATABASE_USER=postgres
+      - DATABASE_PASSWORD=2342ccbd
+      - ALERT_WEBHOOK_URL=http://192.168.0.127:8099/alerts
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped

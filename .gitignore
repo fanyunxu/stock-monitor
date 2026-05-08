@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.log
+app.log
+*.egg-info/
+.eggs/
+
+# Node
+node_modules/
+
+# Logs
+logs/
+app/logs/
+
+# Build
+static/assets/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

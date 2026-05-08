@@ -1,0 +1,18 @@
+database:
+  host: "192.168.0.12"
+  port: 35432
+  name: "stock_monitor"
+  user: "postgres"
+  password: "2342ccbd"
+
+app:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+
+stock:
+  default_market: "CN"
+
+alert:
+  check_interval: 1  # alert check interval in minutes, 0=disabled
+  iyuu_token: "IYUU48964T890653b5a87bb9cb844d59d5920c0b3e5fb9b935"  # IYUU 通知令牌
