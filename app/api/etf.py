@@ -24,6 +24,7 @@ _etf_executor = ThreadPoolExecutor(max_workers=15)
 _cache = {"data": None, "timestamp": 0}
 _CACHE_TTL = 20  # seconds
 _cache_lock = threading.Lock()
+_computing = False
 
 
 # ----- Watch list -----
@@ -204,96 +205,116 @@ def list_etf_signals(db: Session = Depends(get_db)):
     """
     批量获取所有关注 ETF 的最新信号（实时计算，带 20 秒缓存）。
     """
-    # Check cache first
     now = time.time()
+
+    # Fast path: return cached data if valid
     with _cache_lock:
         if _cache["data"] is not None and (now - _cache["timestamp"]) < _CACHE_TTL:
             return _cache["data"]
 
-    watch_list = db.query(EtfWatch).filter(EtfWatch.enabled == True).all()
+    # Slow path: compute if not already computing
+    global _computing
+    if _computing:
+        # Another thread is computing, wait for it
+        while _computing:
+            time.sleep(0.1)
+        with _cache_lock:
+            if _cache["data"] is not None:
+                return _cache["data"]
+        return []
 
-    results = []
-    to_calc = []
+    _computing = True
+    try:
+        # Double-check cache after acquiring lock
+        with _cache_lock:
+            if _cache["data"] is not None and (now - _cache["timestamp"]) < _CACHE_TTL:
+                return _cache["data"]
 
-    for etf in watch_list:
-        cost = float(etf.cost) if etf.cost else None
-        quantity = etf.quantity
-        initial_capital = float(etf.initial_capital) if etf.initial_capital else 2000.0
-        last_stop_loss = etf.last_stop_loss_date
-        template_name = etf.template_name or "CORE"
-        to_calc.append((etf, cost, quantity, initial_capital, last_stop_loss, template_name))
+        watch_list = db.query(EtfWatch).filter(EtfWatch.enabled == True).all()
+        results = []
+        to_calc = []
 
-    # 并行计算所有 ETF 信号
-    def calc_one(args):
-        etf, cost, quantity, initial_capital, last_stop_loss, template_name = args
-        try:
-            return EtfSignalService.calculate_etf_signals(
-                etf.symbol, etf.market,
-                cost=cost, quantity=quantity, initial_capital=initial_capital,
-                last_stop_loss_date=last_stop_loss,
-                template_name=template_name,
-            ), etf
-        except Exception:
-            return None
+        for etf in watch_list:
+            cost = float(etf.cost) if etf.cost else None
+            quantity = etf.quantity
+            initial_capital = float(etf.initial_capital) if etf.initial_capital else 2000.0
+            last_stop_loss = etf.last_stop_loss_date
+            template_name = etf.template_name or "CORE"
+            to_calc.append((etf, cost, quantity, initial_capital, last_stop_loss, template_name))
 
-    futures = [_etf_executor.submit(calc_one, args) for args in to_calc]
-    for future in as_completed(futures):
-        res = future.result()
-        if res is None:
-            continue
-        result, etf = res
-        if "error" in result:
-            continue
-        results.append(EtfSignalWithMeta(
-            symbol=etf.symbol,
-            name=etf.name or etf.symbol,
-            trend=result["trend"],
-            pullback=result["pullback"],
-            sentiment=result["sentiment"],
-            buy_signal=result["buy_signal"],
-            sell_signal=result["sell_signal"],
-            action=result["action"],
-            volume_ratio=result["volume_ratio"],
-            consecutive_up_days=result["consecutive_up_days"],
-            cumulative_return=result.get("cumulative_return"),
-            ma5=result.get("ma5"),
-            ma10=result.get("ma10"),
-            ma20=result.get("ma20"),
-            current_price=result.get("current_price"),
-            daily_return=result.get("change_pct"),
-            volume_signal=result.get("volume_signal"),
-            breakout=result.get("breakout"),
-            reason=result.get("reason"),
-            cost=float(etf.cost) if etf.cost else None,
-            quantity=etf.quantity,
-            profit_loss=round((result.get("current_price") - float(etf.cost)) * etf.quantity, 2) if etf.cost and etf.quantity else None,
-            profit_loss_pct=round((result.get("current_price") - float(etf.cost)) / float(etf.cost) * 100, 2) if etf.cost else None,
-            profit_rate=result.get("profit_rate"),
-            ma20_below_days=result.get("ma20_below_days"),
-            breakout_confirm=result.get("breakout_confirm"),
-            cooldown_days=result.get("cooldown_days"),
-            template_name=result.get("template_name"),
-            params=result.get("params"),
-            is_low_position=result.get("is_low_position"),
-            is_high_position=result.get("is_high_position"),
-            rise_from_low_pct=result.get("rise_from_low_pct"),
-            signal_date=datetime.now(),
-            calculated_at=datetime.now(),
-        ))
-        # SELL_ALL 后：写入止损日期、清空持仓
-        if result.get("action") == "SELL_ALL":
-            from datetime import date as date_cls
-            etf.last_stop_loss_date = date_cls.today()
-            etf.cost = None
-            etf.quantity = None
-            db.commit()
+        # 并行计算所有 ETF 信号
+        def calc_one(args):
+            etf, cost, quantity, initial_capital, last_stop_loss, template_name = args
+            try:
+                return EtfSignalService.calculate_etf_signals(
+                    etf.symbol, etf.market,
+                    cost=cost, quantity=quantity, initial_capital=initial_capital,
+                    last_stop_loss_date=last_stop_loss,
+                    template_name=template_name,
+                ), etf
+            except Exception:
+                return None
 
-    # Update cache
-    with _cache_lock:
-        _cache["data"] = results
-        _cache["timestamp"] = time.time()
+        futures = [_etf_executor.submit(calc_one, args) for args in to_calc]
+        for future in as_completed(futures):
+            res = future.result()
+            if res is None:
+                continue
+            result, etf = res
+            if "error" in result:
+                continue
+            results.append(EtfSignalWithMeta(
+                symbol=etf.symbol,
+                name=etf.name or etf.symbol,
+                trend=result["trend"],
+                pullback=result["pullback"],
+                sentiment=result["sentiment"],
+                buy_signal=result["buy_signal"],
+                sell_signal=result["sell_signal"],
+                action=result["action"],
+                volume_ratio=result["volume_ratio"],
+                consecutive_up_days=result["consecutive_up_days"],
+                cumulative_return=result.get("cumulative_return"),
+                ma5=result.get("ma5"),
+                ma10=result.get("ma10"),
+                ma20=result.get("ma20"),
+                current_price=result.get("current_price"),
+                daily_return=result.get("change_pct"),
+                volume_signal=result.get("volume_signal"),
+                breakout=result.get("breakout"),
+                reason=result.get("reason"),
+                cost=float(etf.cost) if etf.cost else None,
+                quantity=etf.quantity,
+                profit_loss=round((result.get("current_price") - float(etf.cost)) * etf.quantity, 2) if etf.cost and etf.quantity else None,
+                profit_loss_pct=round((result.get("current_price") - float(etf.cost)) / float(etf.cost) * 100, 2) if etf.cost else None,
+                profit_rate=result.get("profit_rate"),
+                ma20_below_days=result.get("ma20_below_days"),
+                breakout_confirm=result.get("breakout_confirm"),
+                cooldown_days=result.get("cooldown_days"),
+                template_name=result.get("template_name"),
+                params=result.get("params"),
+                is_low_position=result.get("is_low_position"),
+                is_high_position=result.get("is_high_position"),
+                rise_from_low_pct=result.get("rise_from_low_pct"),
+                signal_date=datetime.now(),
+                calculated_at=datetime.now(),
+            ))
+            # SELL_ALL 后：写入止损日期、清空持仓
+            if result.get("action") == "SELL_ALL":
+                from datetime import date as date_cls
+                etf.last_stop_loss_date = date_cls.today()
+                etf.cost = None
+                etf.quantity = None
+                db.commit()
 
-    return results
+        # Update cache
+        with _cache_lock:
+            _cache["data"] = results
+            _cache["timestamp"] = time.time()
+
+        return results
+    finally:
+        _computing = False
 
 
 @router.post("/signals/refresh-all", response_model=MessageResponse)
