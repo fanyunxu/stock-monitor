@@ -125,7 +125,9 @@ async function load() {
     }
 
     text.value = lines.join('\n')
-    lastRefresh.value = formatTime()
+    // Use cached data time instead of frontend time
+    const cachedTime = signals.length > 0 ? new Date(signals[0].calculated_at) : null
+    lastRefresh.value = cachedTime ? cachedTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : formatTime()
     resetCountdown()
   } catch (e) {
     text.value = '加载失败: ' + e.message
