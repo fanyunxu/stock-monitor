@@ -8,11 +8,26 @@
     <link href="/static/bootstrap-icons.css" rel="stylesheet">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#0d6efd">
-  <script type="module" crossorigin src="/static/assets/index-Dy240jyq.js"></script>
-  <link rel="stylesheet" crossorigin href="/static/assets/index-BNGCfDx6.css">
+  <script type="module" crossorigin src="/static/assets/index-DNw7ct-n.js"></script>
+  <link rel="stylesheet" crossorigin href="/static/assets/index-CCkBOLdS.css">
 </head>
 <body>
     <div id="app"></div>
+    <script>
+      (function() {
+        var params = new URLSearchParams(window.location.search);
+        var tab = params.get('tab');
+        if (tab) {
+          sessionStorage.setItem('initialTab', tab);
+          if (tab === 'simple') {
+            document.body.classList.add('dark-mode');
+          }
+        }
+      })();
+    </script>
+    <style>
+      body.dark-mode { background-color: #2b2b2b !important; }
+    </style>
     <script src="/static/bootstrap.bundle.min.js"></script>
 </body>
 </html>

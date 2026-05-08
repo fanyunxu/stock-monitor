@@ -108,8 +108,6 @@
             <thead class="table-light">
               <tr>
                 <th>ETF</th>
-                <th>板块</th>
-                <th>模板</th>
                 <th>信号</th>
                 <th>原因</th>
                 <th>趋势</th>

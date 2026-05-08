@@ -31,8 +31,11 @@ const TABS = {
   simple: { component: Simple, props: {} },
 }
 
-const activeTab = ref('etf')
+const activeTab = ref(sessionStorage.getItem('initialTab') || 'etf')
 const navState = reactive({ visible: true })
+
+// Clear the stored tab after reading
+sessionStorage.removeItem('initialTab')
 
 // Provide activeTab and switchTab to all descendants via inject
 provide('activeTab', activeTab)
@@ -63,6 +66,10 @@ const currentProps = computed(() => TABS[activeTab.value]?.props || {})
 }
 body {
   background-color: #f8f9fa;
+}
+body.dark-mode,
+body.dark-mode #app {
+  background-color: #2b2b2b !important;
 }
 .card {
   border: none;

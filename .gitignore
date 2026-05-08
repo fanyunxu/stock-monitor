@@ -1,24 +1,46 @@
 # Python
-venv/
 __pycache__/
 *.py[cod]
-*.log
-app.log
+*.pyc
 *.egg-info/
+.eggs/
+.pytest_cache/
+*.egg
+venv/
+.venv/
+ENV/
+env/
+.env
 .eggs/
 
 # Node
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Logs
 logs/
-app/logs/
+*.log
 
-# Build
+# Build artifacts
 static/assets/
+dist/
+build/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env.local
+.env.*.local
+config.local.yaml

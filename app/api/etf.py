@@ -195,58 +195,22 @@ def get_etf_signal(symbol: str, market: str = "CN", db: Session = Depends(get_db
 @router.get("/signals", response_model=List[EtfSignalWithMeta])
 def list_etf_signals(db: Session = Depends(get_db)):
     """
-    批量获取所有关注 ETF 的最新信号。
-    有缓存信号的直接返回；需要实时计算的并行计算后返回。
+    批量获取所有关注 ETF 的最新信号（实时计算）。
     """
     watch_list = db.query(EtfWatch).filter(EtfWatch.enabled == True).all()
-    today = datetime.now().date()
-    today_start = datetime.combine(today, datetime.min.time())
-
-    # 第一步：批量查所有当天缓存信号（一次 DB 查询）
-    watch_ids = [etf.id for etf in watch_list]
-    cached = {}
-    if watch_ids:
-        rows = db.query(EtfSignal).filter(
-            EtfSignal.etf_watch_id.in_(watch_ids),
-            EtfSignal.signal_date >= today_start
-        ).order_by(EtfSignal.signal_date.desc()).all()
-        for row in rows:
-            if row.etf_watch_id not in cached:  # 只取每个 ETF 当天第一条
-                cached[row.etf_watch_id] = row
 
     results = []
-    to_calc = []  # (etf, cost, quantity, initial_capital, last_stop_loss, template_name)
+    to_calc = []
 
     for etf in watch_list:
-        saved_signal = cached.get(etf.id)
-        if saved_signal:
-            results.append(EtfSignalWithMeta(
-                id=saved_signal.id,
-                symbol=etf.symbol,
-                name=etf.name,
-                trend=saved_signal.trend,
-                pullback=saved_signal.pullback,
-                sentiment=saved_signal.sentiment,
-                buy_signal=saved_signal.buy_signal,
-                sell_signal=saved_signal.sell_signal,
-                action=saved_signal.action,
-                volume_ratio=float(saved_signal.volume_ratio) if saved_signal.volume_ratio else None,
-                consecutive_up_days=saved_signal.consecutive_up_days,
-                cumulative_return=float(saved_signal.cumulative_return) if saved_signal.cumulative_return else None,
-                cost=float(etf.cost) if etf.cost else None,
-                quantity=etf.quantity,
-                signal_date=saved_signal.signal_date,
-                calculated_at=saved_signal.created_at,
-            ))
-        else:
-            cost = float(etf.cost) if etf.cost else None
-            quantity = etf.quantity
-            initial_capital = float(etf.initial_capital) if etf.initial_capital else 2000.0
-            last_stop_loss = etf.last_stop_loss_date
-            template_name = etf.template_name or "CORE"
-            to_calc.append((etf, cost, quantity, initial_capital, last_stop_loss, template_name))
+        cost = float(etf.cost) if etf.cost else None
+        quantity = etf.quantity
+        initial_capital = float(etf.initial_capital) if etf.initial_capital else 2000.0
+        last_stop_loss = etf.last_stop_loss_date
+        template_name = etf.template_name or "CORE"
+        to_calc.append((etf, cost, quantity, initial_capital, last_stop_loss, template_name))
 
-    # 第二步：并行计算缺失信号
+    # 并行计算所有 ETF 信号
     def calc_one(args):
         etf, cost, quantity, initial_capital, last_stop_loss, template_name = args
         try:

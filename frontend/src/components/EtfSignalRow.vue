@@ -4,16 +4,6 @@
       <strong>{{ sig.symbol }}</strong><br>
       <small class="text-muted">{{ sig.name || '' }}</small>
     </td>
-    <!-- 板块 -->
-    <td>
-      <span class="badge" :class="sectorBadge(sector)">{{ sector }}</span>
-    </td>
-    <!-- 模板 -->
-    <td>
-      <span v-if="sig.template_name === 'CORE'" class="badge bg-success">CORE</span>
-      <span v-else-if="sig.template_name === 'THEME'" class="badge bg-warning text-dark">THEME</span>
-      <span v-else class="badge bg-secondary">{{ sig.template_name || 'CORE' }}</span>
-    </td>
     <!-- 信号 -->
     <td>
       <span v-if="sig.buy_signal" class="badge bg-success">买入</span>
@@ -121,8 +111,6 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-
 const props = defineProps({
   sig: { type: Object, required: true },
   refreshingRow: { type: Boolean, default: false },
@@ -130,39 +118,6 @@ const props = defineProps({
 })
 
 defineEmits(['edit', 'remove'])
-
-const MANAGERS = '华夏|易方达|国泰|广发|南方|博时|嘉实|华安|华宝|华泰柏瑞|景顺|平安|天弘|建信|中银|富国|汇添富|鹏华|招商|工银|申万菱信|永赢|民生加银|大成|交银|银华|前海开源|等权重|国联安|国寿'
-
-function extractSector(name) {
-  if (!name) return '—'
-  const cleaned = name.replace(/ETF/gi, '').trim()
-  // 去掉末尾的管理公司名，返回前面的板块部分
-  // 例如 "科创50华夏" → "科创50"，"半导体鹏华" → "半导体"
-  const m = cleaned.match(new RegExp(`^(.+?)[\s\u00A0]*(${MANAGERS})+$`))
-  if (m) return m[1].trim() || '—'
-  // 没有匹配到管理器，当作整体返回
-  return cleaned
-}
-
-const sector = computed(() => extractSector(props.sig.name))
-
-function sectorBadge(s) {
-  if (s.includes('航空') || s.includes('航天')) return 'bg-primary text-white'
-  if (s.includes('军工')) return 'bg-danger text-white'
-  if (s.includes('5G') || s.includes('通信')) return 'bg-info text-dark'
-  if (s.includes('半导体') || s.includes('芯片')) return 'bg-dark text-white'
-  if (s.includes('人工智能') || s.includes('AI')) return 'bg-success text-white'
-  if (s.includes('光伏') || s.includes('电池')) return 'bg-warning text-dark'
-  if (s.includes('新能源')) return 'bg-success text-white'
-  if (s.includes('稀土')) return 'bg-warning text-dark'
-  if (s.includes('碳中和')) return 'bg-info text-dark'
-  if (s.includes('电力')) return 'bg-secondary text-white'
-  if (s.includes('消费电子') || s.includes('电子')) return 'bg-danger text-white'
-  if (s.includes('科创')) return 'bg-primary text-white'
-  if (s.includes('养殖')) return 'bg-secondary text-white'
-  if (s.includes('TMT')) return 'bg-primary text-white'
-  return 'bg-secondary text-white'
-}
 </script>
 
 <style scoped>
