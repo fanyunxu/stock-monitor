@@ -19,7 +19,11 @@ from app.services.alert_service import AlertService
 Base.metadata.create_all(bind=engine)
 
 def load_config():
-    path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    # Look for config.yaml in the project root (parent of app directory)
+    import os
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(app_dir)
+    path = os.path.join(root_dir, "config.yaml")
     if os.path.exists(path):
         with open(path) as f:
             return yaml.safe_load(f) or {}
