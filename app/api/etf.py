@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+import threading
 
 from app.models import get_db
 from app.models.models import EtfWatch, EtfSignal
@@ -17,6 +19,11 @@ router = APIRouter(prefix="/api/etf", tags=["etf"])
 
 # 并行线程池，最大同时计算 15 个 ETF 信号
 _etf_executor = ThreadPoolExecutor(max_workers=15)
+
+# ETF signals cache
+_cache = {"data": None, "timestamp": 0}
+_CACHE_TTL = 20  # seconds
+_cache_lock = threading.Lock()
 
 
 # ----- Watch list -----
@@ -195,8 +202,14 @@ def get_etf_signal(symbol: str, market: str = "CN", db: Session = Depends(get_db
 @router.get("/signals", response_model=List[EtfSignalWithMeta])
 def list_etf_signals(db: Session = Depends(get_db)):
     """
-    批量获取所有关注 ETF 的最新信号（实时计算）。
+    批量获取所有关注 ETF 的最新信号（实时计算，带 20 秒缓存）。
     """
+    # Check cache first
+    now = time.time()
+    with _cache_lock:
+        if _cache["data"] is not None and (now - _cache["timestamp"]) < _CACHE_TTL:
+            return _cache["data"]
+
     watch_list = db.query(EtfWatch).filter(EtfWatch.enabled == True).all()
 
     results = []
@@ -274,6 +287,11 @@ def list_etf_signals(db: Session = Depends(get_db)):
             etf.cost = None
             etf.quantity = None
             db.commit()
+
+    # Update cache
+    with _cache_lock:
+        _cache["data"] = results
+        _cache["timestamp"] = time.time()
 
     return results
 
