@@ -13,25 +13,19 @@
 <script setup>
 import { ref, reactive, provide, computed } from 'vue'
 import NavBar from './components/NavBar.vue'
-import Dashboard from './views/Dashboard.vue'
 import Alerts from './views/Alerts.vue'
-import History from './views/History.vue'
 import Server from './views/Server.vue'
 import Logs from './views/Logs.vue'
 import Simple from './views/Simple.vue'
-import EtfSignals from './views/EtfSignals.vue'
 
 const TABS = {
-  dashboard: { component: Dashboard, props: {} },
   alerts: { component: Alerts, props: {} },
-  etf: { component: EtfSignals, props: {} },
-  history: { component: History, props: {} },
   server: { component: Server, props: {} },
   logs: { component: Logs, props: {} },
   simple: { component: Simple, props: {} },
 }
 
-const activeTab = ref(sessionStorage.getItem('initialTab') || 'etf')
+const activeTab = ref(sessionStorage.getItem('initialTab') || 'alerts')
 const navState = reactive({ visible: true })
 
 // Clear the stored tab after reading
@@ -42,11 +36,6 @@ provide('activeTab', activeTab)
 provide('navState', navState)
 
 function switchTab(tab, opts = {}) {
-  if (tab === 'alerts') {
-    TABS.alerts.props = { preselectedStock: opts.stock || null }
-  } else if (tab === 'history') {
-    TABS.history.props = { stockId: opts.stockId || null, stockName: opts.stockName || '' }
-  }
   if (tab === 'simple') {
     navState.visible = false
   }
@@ -55,7 +44,7 @@ function switchTab(tab, opts = {}) {
 
 provide('switchTab', switchTab)
 
-const currentView = computed(() => TABS[activeTab.value]?.component || Dashboard)
+const currentView = computed(() => TABS[activeTab.value]?.component || Alerts)
 const currentProps = computed(() => TABS[activeTab.value]?.props || {})
 </script>
 

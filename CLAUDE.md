@@ -11,22 +11,11 @@ A web-based stock monitoring and ETF signal management system.
 ## Quick Start
 
 ```bash
-# Create venv and install dependencies
-virtualenv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# 一键启动/重启（推荐）
+./run.sh
 
-# Install frontend dependencies
-cd frontend && npm install && npm run build && cd ..
-
-# Create font symlinks
-ln -sf frontend/node_modules/bootstrap-icons/font/bootstrap-icons.woff2 static/fonts/
-ln -sf frontend/node_modules/bootstrap-icons/font/bootstrap-icons.woff static/fonts/
-
-# Run (set database env vars as needed)
-DATABASE_HOST=192.168.0.12 DATABASE_PORT=35432 DATABASE_NAME=stock_monitor \
-DATABASE_USER=postgres DATABASE_PASSWORD=xxx \
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Access: http://localhost:8000
+# Idea mode: http://localhost:8000/idea
 ```
 
 ## Project Structure

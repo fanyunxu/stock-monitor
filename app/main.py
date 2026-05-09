@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, Body, Depends, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import threading
@@ -145,9 +144,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files and templates
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
 
 # Include routers
 app.include_router(stocks.router)
@@ -168,6 +166,11 @@ def root(request: Request):
 def simple_shortcut():
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/?tab=simple")
+
+@app.get("/idea")
+def idea_mode():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/idea.html")
 
 
 @app.get("/api/market/index")

@@ -11,9 +11,9 @@
     </div>
 
     <!-- Filter hint -->
-    <div v-if="filterMode !== 'all'" class="alert alert-info py-2 mb-3" style="font-size:0.85rem">
-      <i class="bi bi-filter me-1"></i>当前筛选：<strong>{{ filterLabel }}</strong>
-      <button class="btn btn-sm btn-outline-info float-end py-0 px-2" @click="filterMode = 'all'">清除</button>
+    <div v-if="filterMode !== 'all' || searchQuery" class="alert alert-info py-2 mb-3" style="font-size:0.85rem">
+      <i class="bi bi-filter me-1"></i>当前筛选：<strong>{{ filterLabel }}{{ searchQuery ? (filterLabel ? ' + ' : '') + '搜索: ' + searchQuery : '' }}</strong>
+      <button class="btn btn-sm btn-outline-info float-end py-0 px-2" @click="clearFilters">清除</button>
     </div>
 
     <!-- Header Stats -->
@@ -46,11 +46,11 @@
         </div>
       </div>
       <div class="col-md-3">
-        <div class="card text-white clickable-card" :class="filterMode === 'all' ? 'bg-dark border-3 border-white' : 'bg-dark'"
-             @click="filterMode = 'all'">
+        <div class="card text-white clickable-card" :class="filterMode === 'holding' ? 'bg-info border-3 border-dark' : 'bg-info'"
+             @click="toggleFilter('holding')">
           <div class="card-body py-2">
-            <h6 class="card-title mb-1"><i class="bi bi-eye me-2"></i>关注 ETF</h6>
-            <h3 class="mb-0">{{ watchList.length }}</h3>
+            <h6 class="card-title mb-1"><i class="bi bi-wallet2 me-2"></i>持有</h6>
+            <h3 class="mb-0">{{ holdingCount }}</h3>
           </div>
         </div>
       </div>
@@ -63,19 +63,20 @@
 
       <div class="card-header d-flex justify-content-between align-items-center">
         <div class="d-flex align-items-center gap-2">
-          <h5 class="mb-0"><i class="bi bi-activity me-2"></i>ETF 交易信号 <span class="badge bg-secondary ms-1">{{ filteredSignals.length }}</span></h5>
+          <h5 class="mb-0"><i class="bi bi-activity me-2"></i>量化交易信号 <span class="badge bg-secondary ms-1">{{ signals.length }}</span></h5>
           <span v-if="refreshing" class="spinner-border spinner-border-sm text-primary" role="status"></span>
           <small v-if="lastRefreshText || !refreshing" class="text-muted" style="font-size:0.7rem;">
             {{ lastRefreshText }}
             <span v-if="lastRefreshText"> | </span>{{ nextRefreshText }}
           </small>
+          <input v-model="searchQuery" type="text" class="form-control form-control-sm" placeholder="代码/名称搜索" style="width:130px;">
         </div>
         <div>
           <button class="btn btn-outline-primary btn-sm me-2" @click="loadSignals" :disabled="refreshing">
             <i class="bi bi-arrow-clockwise me-1"></i>{{ refreshing ? '刷新中...' : '刷新' }}
           </button>
           <button class="btn btn-primary btn-sm" @click="showAddModal">
-            <i class="bi bi-plus-lg me-1"></i>添加 ETF
+            <i class="bi bi-plus-lg me-1"></i>添加
           </button>
         </div>
       </div>
@@ -150,13 +151,13 @@
       <div class="modal-dialog">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>添加 ETF 到关注列表</h5>
+            <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>添加到量化列表</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
             <div class="mb-3">
               <label for="etfSymbol" class="form-label">ETF 代码</label>
-              <input v-model="addForm.symbol" type="text" class="form-control" id="etfSymbol" placeholder="例如：512480（半导体）、159915（创业板）">
+              <input v-model="addForm.symbol" type="text" class="form-control" id="etfSymbol" placeholder="例如：512480、159915">
               <div class="form-text">支持上海 ETF（510xxx/511xxx）和深圳 ETF（159xxx）</div>
             </div>
             <div class="mb-3">
@@ -243,7 +244,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import EtfSignalRow from '../components/EtfSignalRow.vue'
 
 const API = '/api'
-const AUTO_REFRESH_INTERVAL = 60 * 1000
+const AUTO_REFRESH_INTERVAL = 30 * 1000
 
 const watchList = ref([])
 const signals = ref([])
@@ -252,31 +253,49 @@ const toasts = ref([])
 const addForm = ref({ symbol: '', name: '', initial_capital: 2000, cost: null, quantity: null, template_name: 'CORE' })
 const editForm = ref({ symbol: '', cost: null, quantity: null, template_name: 'CORE' })
 const filterMode = ref('all')
+const searchQuery = ref('')
 
 const refreshing = ref(false)
 const refreshingSymbol = ref('')
 const refreshProgress = ref(0)
 const refreshSymbol = ref('')
 const lastRefresh = ref(null)
+const cachedAt = ref(null)
 let autoRefreshTimer = null
 let countdownTimer = null
-const countdownSec = ref(60)
+const countdownSec = ref(30)
 
 const buyCount = computed(() => signals.value.filter(s => s.buy_signal).length)
 const sellCount = computed(() => signals.value.filter(s => s.sell_signal).length)
 const holdCount = computed(() => signals.value.filter(s => !s.buy_signal && !s.sell_signal).length)
+const holdingCount = computed(() => signals.value.filter(s => s.quantity && s.quantity > 0).length)
 
 const filteredSignals = computed(() => {
-  if (filterMode.value === 'buy') return signals.value.filter(s => s.buy_signal)
-  if (filterMode.value === 'sell') return signals.value.filter(s => s.sell_signal)
-  if (filterMode.value === 'hold') return signals.value.filter(s => !s.buy_signal && !s.sell_signal)
-  return signals.value
+  let result = signals.value
+
+  if (filterMode.value === 'buy') result = result.filter(s => s.buy_signal)
+  else if (filterMode.value === 'sell') result = result.filter(s => s.sell_signal)
+  else if (filterMode.value === 'hold') result = result.filter(s => !s.buy_signal && !s.sell_signal)
+  else if (filterMode.value === 'holding') result = result.filter(s => s.quantity && s.quantity > 0)
+  else if (filterMode.value === 'no_holding') result = result.filter(s => !s.quantity || s.quantity <= 0)
+
+  if (searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase()
+    result = result.filter(s =>
+      (s.symbol && s.symbol.toLowerCase().includes(q)) ||
+      (s.name && s.name.toLowerCase().includes(q))
+    )
+  }
+
+  return result
 })
 
 const filterLabel = computed(() => {
   if (filterMode.value === 'buy') return '买入信号'
   if (filterMode.value === 'sell') return '卖出信号'
   if (filterMode.value === 'hold') return '观望'
+  if (filterMode.value === 'holding') return '持有'
+  if (filterMode.value === 'no_holding') return '未持股'
   return ''
 })
 
@@ -284,12 +303,18 @@ function toggleFilter(mode) {
   filterMode.value = filterMode.value === mode ? 'all' : mode
 }
 
+function clearFilters() {
+  filterMode.value = 'all'
+  searchQuery.value = ''
+}
+
 const lastRefreshText = computed(() => {
-  if (!lastRefresh.value) return ''
-  const diff = Math.floor((Date.now() - lastRefresh.value) / 1000)
-  if (diff < 2) return '刚刚刷新'
-  if (diff < 60) return `${diff}秒前`
-  return ''
+  if (!cachedAt.value) return ''
+  const d = new Date(cachedAt.value)
+  const h = String(d.getHours()).padStart(2, '0')
+  const m = String(d.getMinutes()).padStart(2, '0')
+  const s = String(d.getSeconds()).padStart(2, '0')
+  return `${h}:${m}:${s}`
 })
 
 const nextRefreshText = computed(() => {
@@ -351,6 +376,9 @@ async function loadSignals() {
     if (!r.ok) throw new Error(await r.text())
     signals.value = await r.json()
     lastRefresh.value = Date.now()
+    if (signals.value.length > 0 && signals.value[0].calculated_at) {
+      cachedAt.value = signals.value[0].calculated_at
+    }
   } catch (e) {
     showToast('刷新信号失败: ' + e.message, 'danger')
   } finally {
@@ -402,15 +430,15 @@ async function removeEtf(symbol) {
 function startAutoRefresh() {
   stopAutoRefresh()
   lastRefresh.value = Date.now()
-  countdownSec.value = 60
+  countdownSec.value = 30
   countdownTimer = setInterval(() => {
     countdownSec.value = Math.max(0, countdownSec.value - 1)
   }, 1000)
   autoRefreshTimer = setInterval(() => {
     lastRefresh.value = Date.now()
-    countdownSec.value = 60
+    countdownSec.value = 30
     loadSignals()
-  }, 60000)
+  }, 30000)
 }
 
 function stopAutoRefresh() {

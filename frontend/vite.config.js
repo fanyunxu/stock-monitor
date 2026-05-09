@@ -9,7 +9,10 @@ export default defineConfig({
     outDir: resolve(__dirname, '../static'),
     emptyOutDir: false,
     rollupOptions: {
-      external: ['/static/bootstrap.bundle.min.js'],
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        idea: resolve(__dirname, 'idea.html'),
+      },
     },
   },
 })

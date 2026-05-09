@@ -103,6 +103,9 @@
       <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" @click="$emit('edit', sig)" title="编辑持仓" :disabled="refreshing">
         <i class="bi bi-pencil"></i>
       </button>
+      <button class="btn btn-outline-warning btn-sm py-0 px-1 me-1" @click="$emit('rule', sig)" title="告警规则" :disabled="refreshing">
+        <i class="bi bi-bell"></i>
+      </button>
       <button class="btn btn-outline-danger btn-sm py-0 px-1" @click="$emit('remove', sig.symbol)" :disabled="refreshing">
         <i class="bi bi-trash"></i>
       </button>
@@ -117,7 +120,7 @@ const props = defineProps({
   refreshing: { type: Boolean, default: false },
 })
 
-defineEmits(['edit', 'remove'])
+defineEmits(['edit', 'remove', 'rule'])
 </script>
 
 <style scoped>

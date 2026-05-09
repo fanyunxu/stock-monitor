@@ -1,8 +1,8 @@
 <template>
   <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container">
-      <button class="navbar-brand btn btn-link text-decoration-none text-white p-0" @click="switchTab('dashboard')">
-        <i class="bi bi-graph-up-arrow me-2"></i>盯盘助手
+      <button class="navbar-brand btn btn-link text-decoration-none text-white p-0" @click="switchTab('quant')">
+        <i class="bi bi-graph-up-arrow me-2"></i>量化助手
         <span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem" title="前端版本">前{{ frontendVersion }}</span>
         <span class="badge bg-dark ms-1" style="font-size: 0.65rem" title="后端版本">后{{ backendVersion || '—' }}</span>
       </button>
@@ -38,10 +38,7 @@ const navState = inject('navState')
 const switchTab = inject('switchTab')
 
 const navItems = [
-  { tab: 'dashboard', label: '控制台', icon: 'bi bi-list-ul' },
-  { tab: 'alerts',    label: '告警规则', icon: 'bi bi-bell' },
-  { tab: 'etf',       label: 'ETF 信号', icon: 'bi bi-bar-chart-fill' },
-  { tab: 'history',   label: '告警历史', icon: 'bi bi-clock-history' },
+  { tab: 'alerts',    label: '股票', icon: 'bi bi-bar-chart-fill' },
   { tab: 'server',    label: '服务器监控', icon: 'bi bi-server' },
   { tab: 'logs',      label: '运行日志', icon: 'bi bi-journal-text' },
   { tab: 'simple',    label: '极简模式', icon: 'bi bi-text-left' },

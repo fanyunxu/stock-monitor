@@ -78,63 +78,6 @@
           </div>
         </div>
       </div>
-      <!-- ETF信号 -->
-      <div class="card mt-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <h5 class="mb-0">
-            <i class="bi bi-bar-chart-fill me-2"></i>ETF信号 <span class="badge bg-secondary ms-2">{{ etfSignals.length }}</span>
-          </h5>
-          <button class="btn btn-outline-primary btn-sm" @click="switchTab('etf')">
-            <i class="bi bi-arrow-right me-1"></i>详情
-          </button>
-        </div>
-        <div class="card-body p-0">
-          <div v-if="etfSignals.length > 0" class="table-responsive">
-            <table class="table table-hover mb-0">
-              <thead>
-                <tr>
-                  <th>代码</th>
-                  <th>板块</th>
-                  <th>名称</th>
-                  <th>现价</th>
-                  <th>日涨跌</th>
-                  <th>趋势</th>
-                  <th>信号</th>
-                  <th>操作</th>
-                  <th>信号原因</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="sig in etfSignals" :key="sig.symbol">
-                  <td><span class="stock-tag">{{ sig.symbol }}</span></td>
-                  <td><span class="badge" :class="getSectorBadge(sig.name)">{{ getSector(sig.name) }}</span></td>
-                  <td>{{ sig.name || sig.symbol }}</td>
-                  <td>{{ sig.current_price != null ? sig.current_price.toFixed(3) : '-' }}</td>
-                  <td :class="sig.daily_return > 0 ? 'price-up' : sig.daily_return < 0 ? 'price-down' : 'price-unchanged'">
-                    {{ sig.daily_return != null ? (sig.daily_return > 0 ? '+' : '') + sig.daily_return.toFixed(2) + '%' : '-' }}
-                  </td>
-                  <td>
-                    <span class="badge" :class="sig.trend === 'UP' ? 'bg-success' : sig.trend === 'DOWN' ? 'bg-danger' : 'bg-secondary'">{{ sig.trend }}</span>
-                  </td>
-                  <td>
-                    <span v-if="sig.buy_signal" class="badge bg-success">买入</span>
-                    <span v-else-if="sig.sell_signal" class="badge bg-danger">卖出</span>
-                    <span v-else class="badge bg-secondary">持有</span>
-                  </td>
-                  <td>
-                    <span class="badge" :class="sig.action === 'BUY' ? 'bg-success' : sig.action === 'SELL' ? 'bg-danger' : 'bg-secondary'">{{ sig.action }}</span>
-                  </td>
-                  <td class="small text-muted" style="max-width:200px">{{ sig.reason || '-' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="text-center text-muted py-4">
-            <i class="bi bi-inbox fs-1"></i>
-            <p class="mt-2">暂无ETF信号</p>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Add Stock Modal -->
