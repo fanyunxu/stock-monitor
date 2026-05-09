@@ -36,6 +36,7 @@ _EXTENDED_SIGNAL_FIELDS = [
     "position_ratio", "max_position_ratio", "can_add_position",
     "ai_summary", "ai_signal", "ai_confidence", "ai_risk_level",
     "decision_factors", "technical_snapshot",
+    "instrument_type", "strategy_profile", "breakout_score",
 ]
 
 
@@ -73,6 +74,7 @@ def add_etf_watch(data: EtfWatchCreate, db: Session = Depends(get_db)):
         initial_capital=data.initial_capital or 2000.0,
         cost=data.cost,
         quantity=data.quantity,
+        instrument_type=data.instrument_type or "ETF",
     )
     db.add(etf)
     db.commit()
@@ -92,6 +94,8 @@ def update_etf_holdings(symbol: str, data: EtfWatchCreate, db: Session = Depends
         etf.quantity = data.quantity
     if data.template_name is not None:
         etf.template_name = data.template_name
+    if data.instrument_type is not None:
+        etf.instrument_type = data.instrument_type
     db.commit()
     db.refresh(etf)
     return etf
@@ -132,12 +136,14 @@ def get_etf_signal(symbol: str, market: str = "CN", db: Session = Depends(get_db
     initial_capital = float(etf.initial_capital) if etf and etf.initial_capital else 2000.0
     last_stop_loss = etf.last_stop_loss_date if etf else None
     template_name = etf.template_name if etf else "CORE"
+    instrument_type = etf.instrument_type if etf else "ETF"
     try:
         result = EtfSignalService.calculate_etf_signals(
             symbol.upper(), market,
             cost=cost, quantity=quantity, initial_capital=initial_capital,
             last_stop_loss_date=last_stop_loss,
             template_name=template_name,
+            instrument_type=instrument_type,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"信号计算失败: {e}")
@@ -257,17 +263,19 @@ def list_etf_signals(db: Session = Depends(get_db)):
             initial_capital = float(etf.initial_capital) if etf.initial_capital else 2000.0
             last_stop_loss = etf.last_stop_loss_date
             template_name = etf.template_name or "CORE"
-            to_calc.append((etf, cost, quantity, initial_capital, last_stop_loss, template_name))
+            instrument_type = etf.instrument_type or "ETF"
+            to_calc.append((etf, cost, quantity, initial_capital, last_stop_loss, template_name, instrument_type))
 
         # 并行计算所有 ETF 信号
         def calc_one(args):
-            etf, cost, quantity, initial_capital, last_stop_loss, template_name = args
+            etf, cost, quantity, initial_capital, last_stop_loss, template_name, instrument_type = args
             try:
                 return EtfSignalService.calculate_etf_signals(
                     etf.symbol, etf.market,
                     cost=cost, quantity=quantity, initial_capital=initial_capital,
                     last_stop_loss_date=last_stop_loss,
                     template_name=template_name,
+                    instrument_type=instrument_type,
                 ), etf
             except Exception:
                 return None

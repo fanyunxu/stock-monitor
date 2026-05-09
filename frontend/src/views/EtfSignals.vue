@@ -161,9 +161,23 @@
           </div>
           <div class="modal-body">
             <div class="mb-3">
-              <label for="etfSymbol" class="form-label">ETF 代码</label>
-              <input v-model="addForm.symbol" type="text" class="form-control" id="etfSymbol" placeholder="例如：512480、159915">
-              <div class="form-text">支持上海 ETF（510xxx/511xxx）和深圳 ETF（159xxx）</div>
+              <label class="form-label">标的类型</label>
+              <div>
+                <div class="form-check form-check-inline">
+                  <input v-model="addForm.instrument_type" class="form-check-input" type="radio" id="typeEtf" value="ETF">
+                  <label class="form-check-label" for="typeEtf">ETF（基金）</label>
+                </div>
+                <div class="form-check form-check-inline">
+                  <input v-model="addForm.instrument_type" class="form-check-input" type="radio" id="typeStock" value="STOCK">
+                  <label class="form-check-label" for="typeStock">股票</label>
+                </div>
+              </div>
+              <div class="form-text">ETF使用趋势策略，股票使用突破策略（风控更严格）</div>
+            </div>
+            <div class="mb-3">
+              <label for="etfSymbol" class="form-label">代码</label>
+              <input v-model="addForm.symbol" type="text" class="form-control" id="etfSymbol" placeholder="例如：512480、159915、600519、000001">
+              <div class="form-text">支持 ETF（510xxx/159xxx）和股票（600xxx/000xxx/300xxx）</div>
             </div>
             <div class="mb-3">
               <label for="etfName" class="form-label">名称（可选）</label>
@@ -212,6 +226,20 @@
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">标的类型</label>
+              <div>
+                <div class="form-check form-check-inline">
+                  <input v-model="editForm.instrument_type" class="form-check-input" type="radio" id="editTypeEtf" value="ETF">
+                  <label class="form-check-label" for="editTypeEtf">ETF（基金）</label>
+                </div>
+                <div class="form-check form-check-inline">
+                  <input v-model="editForm.instrument_type" class="form-check-input" type="radio" id="editTypeStock" value="STOCK">
+                  <label class="form-check-label" for="editTypeStock">股票</label>
+                </div>
+              </div>
+              <div class="form-text">修改类型后将使用对应的策略计算信号</div>
+            </div>
             <div class="row">
               <div class="col-6">
                 <div class="mb-3">
@@ -255,8 +283,8 @@ const watchList = ref([])
 const signals = ref([])
 const loading = ref(false)
 const toasts = ref([])
-const addForm = ref({ symbol: '', name: '', initial_capital: 2000, cost: null, quantity: null, template_name: 'CORE' })
-const editForm = ref({ symbol: '', cost: null, quantity: null, template_name: 'CORE' })
+const addForm = ref({ symbol: '', name: '', initial_capital: 2000, cost: null, quantity: null, template_name: 'CORE', instrument_type: 'ETF' })
+const editForm = ref({ symbol: '', cost: null, quantity: null, template_name: 'CORE', instrument_type: 'ETF' })
 const filterMode = ref('all')
 const searchQuery = ref('')
 
@@ -335,12 +363,12 @@ function showToast(message, type = 'info') {
 function removeToast(id) { toasts.value = toasts.value.filter(t => t.id !== id) }
 
 function showAddModal() {
-  addForm.value = { symbol: '', name: '', initial_capital: 2000, cost: null, quantity: null, template_name: 'CORE' }
+  addForm.value = { symbol: '', name: '', initial_capital: 2000, cost: null, quantity: null, template_name: 'CORE', instrument_type: 'ETF' }
   new window.bootstrap.Modal(document.getElementById('addEtfModal')).show()
 }
 
 function openEditModal(sig) {
-  editForm.value = { symbol: sig.symbol, cost: sig.cost || null, quantity: sig.quantity || null, template_name: sig.template_name || 'CORE' }
+  editForm.value = { symbol: sig.symbol, cost: sig.cost || null, quantity: sig.quantity || null, template_name: sig.template_name || 'CORE', instrument_type: sig.instrument_type || 'ETF' }
   new window.bootstrap.Modal(document.getElementById('editHoldingsModal')).show()
 }
 
@@ -354,6 +382,7 @@ async function editEtfHoldings() {
         cost: editForm.value.cost,
         quantity: editForm.value.quantity,
         template_name: editForm.value.template_name,
+        instrument_type: editForm.value.instrument_type,
       })
     })
     if (!r.ok) throw new Error('更新失败')
@@ -395,7 +424,7 @@ async function loadSignals() {
 
 async function addEtf() {
   const sym = addForm.value.symbol.trim().toUpperCase()
-  if (!sym) { showToast('请输入 ETF 代码', 'warning'); return }
+  if (!sym) { showToast('请输入代码', 'warning'); return }
   try {
     const r = await fetch(`${API}/etf/watch`, {
       method: 'POST',
@@ -408,6 +437,7 @@ async function addEtf() {
         cost: addForm.value.cost || undefined,
         quantity: addForm.value.quantity || undefined,
         template_name: addForm.value.template_name || 'CORE',
+        instrument_type: addForm.value.instrument_type || 'ETF',
       })
     })
     if (!r.ok) {
@@ -415,7 +445,7 @@ async function addEtf() {
       throw new Error(err.detail || '添加失败')
     }
     window.bootstrap.Modal.getInstance(document.getElementById('addEtfModal'))?.hide()
-    showToast('ETF 添加成功', 'success')
+    showToast('添加成功', 'success')
     await loadWatchList()
     await loadSignals()
   } catch (e) { showToast(e.message, 'danger') }

@@ -123,6 +123,7 @@ class EtfWatchBase(BaseModel):
     cost: Optional[float] = None
     quantity: Optional[int] = None
     template_name: Optional[str] = "CORE"
+    instrument_type: Optional[str] = "ETF"  # ETF 或 STOCK
 
 
 class EtfWatchCreate(EtfWatchBase):
@@ -248,6 +249,11 @@ class EtfSignalWithMeta(BaseModel):
     ai_risk_level: Optional[str] = None
     decision_factors: Optional[List[str]] = None
     technical_snapshot: Optional[dict] = None
+
+    # 标的类型和策略
+    instrument_type: Optional[str] = None  # ETF 或 STOCK
+    strategy_profile: Optional[str] = None  # ETF_TREND 或 STOCK_BREAKOUT
+    breakout_score: Optional[float] = None  # 突破评分（股票策略用）
 
     class Config:
         from_attributes = True

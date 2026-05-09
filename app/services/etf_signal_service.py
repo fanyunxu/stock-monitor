@@ -274,7 +274,8 @@ class EtfSignalService:
                               cost: float = None, quantity: int = None,
                               initial_capital: float = 2000.0,
                               last_stop_loss_date=None,
-                              template_name: str = None) -> dict:
+                              template_name: str = None,
+                              instrument_type: str = "ETF") -> dict:
         template_name = template_name or EtfSignalService.DEFAULT_TEMPLATE
         params = EtfSignalService.TEMPLATES.get(template_name, EtfSignalService.TEMPLATES["CORE"])
 
@@ -493,41 +494,131 @@ class EtfSignalService:
         sell_signal = False
         ai_signal = "HOLD"
 
-        if not has_position:
-            if cooldown_remaining > 0:
-                reason = f"冷却期剩余{cooldown_remaining}天，暂停买入"
-            elif buy_score >= 70 and market_data["market_filter"] != "BLOCK":
-                adjusted_buy_ratio = buy_ratio * (0.7 if market_data["market_filter"] == "CAUTION" else 1)
-                action = f"BUY_{int(adjusted_buy_ratio * 100)}"
-                reason = f"买入评分{buy_score}，趋势/动量/市场过滤满足试仓条件"
-                buy_signal = True
-                ai_signal = "BUY"
+        # 根据标的类型确定策略
+        strategy_profile = "ETF_TREND" if instrument_type == "ETF" else "STOCK_BREAKOUT"
+
+        # 计算突破评分（股票策略用）
+        breakout_score = 50.0
+        if breakout_data["breakout_quality"] == "VOLUME_CONFIRMED":
+            breakout_score = 85.0
+        elif breakout_data["breakout_quality"] == "CONFIRMED":
+            breakout_score = 72.0
+        elif breakout_data["breakout_quality"] == "WEAK":
+            breakout_score = 55.0
+        elif breakout_data["breakout"]:
+            breakout_score = 48.0
+
+        if instrument_type == "STOCK":
+            # 股票策略：更严格的风控
+            if not has_position:
+                if cooldown_remaining > 0:
+                    reason = f"冷却期剩余{cooldown_remaining}天，暂停买入"
+                elif buy_score >= 75 and risk_score < 55 and (market_data["market_filter"] == "PASS" or market_data["market_filter"] == "CAUTION"):
+                    # 股票买入需要更高评分，且满足以下条件之一：
+                    # 1. 确认突破 + 量能配合
+                    # 2. 强趋势 + 回踩 + 量能正常
+                    can_buy = False
+                    if breakout_data["breakout_quality"] in ["CONFIRMED", "VOLUME_CONFIRMED"]:
+                        can_buy = True
+                    elif trend_strength >= 68 and pullback and volume_signal != "RISK":
+                        can_buy = True
+
+                    # 额外风控：RSI不能过热，ATR不能过高
+                    if rsi is not None and rsi > 72:
+                        can_buy = False
+                    if atr_pct is not None and atr_pct > 6:
+                        can_buy = False
+
+                    if can_buy:
+                        adjusted_buy_ratio = buy_ratio * (0.7 if market_data["market_filter"] == "CAUTION" else 1)
+                        action = f"BUY_{int(adjusted_buy_ratio * 100)}"
+                        reason = f"股票买入评分{buy_score}，突破确认或强趋势回踩，风险可控"
+                        buy_signal = True
+                        ai_signal = "BUY"
+                    else:
+                        reason = f"股票买入评分{buy_score}，但缺乏确认信号或风控不通过，继续观察"
+                else:
+                    reason = f"股票买入评分{buy_score}，未达阈值或风险偏高，继续观察"
             else:
-                reason = f"买入评分{buy_score}未达阈值或市场过滤偏谨慎，继续观察"
+                # 股票持仓：更敏感的卖出
+                if stop_loss_triggered or (profit_rate is not None and profit_rate <= stop_loss and current_price < ma20):
+                    action = "SELL_ALL"
+                    reason = f"卖出评分{sell_score}，触发动态止损或固定止损"
+                    sell_signal = True
+                    ai_signal = "SELL"
+                elif volume_signal == "RISK" and profit_rate is not None and profit_rate < 0.02:
+                    action = "SELL_ALL"
+                    reason = f"卖出评分{sell_score}，放量下跌且盈利不足，止损离场"
+                    sell_signal = True
+                    ai_signal = "SELL"
+                elif sell_score >= 78 and profit_rate is not None and profit_rate < 0:
+                    action = "SELL_ALL"
+                    reason = f"卖出评分{sell_score}，亏损叠加趋势/市场风险"
+                    sell_signal = True
+                    ai_signal = "SELL"
+                elif sell_score >= 72 or (rsi is not None and rsi > 80 and consecutive_up_days >= 3):
+                    action = "SELL_PARTIAL"
+                    reason = f"卖出评分{sell_score}，风险升高或过热，建议减仓"
+                    sell_signal = True
+                    ai_signal = "REDUCE"
+                elif buy_score >= 80 and profit_rate is not None and profit_rate >= add_profit_threshold and can_add_position and market_data["market_filter"] != "BLOCK":
+                    # 股票加仓：需要更高评分和更强确认
+                    can_add = False
+                    if breakout_data["breakout_quality"] == "VOLUME_CONFIRMED":
+                        can_add = True
+                    elif trend_strength >= 75:
+                        can_add = True
+
+                    if atr_pct is not None and atr_pct > 6:
+                        can_add = False
+
+                    if can_add:
+                        adjusted_add_ratio = add_ratio * (0.7 if market_data["market_filter"] == "CAUTION" else 1)
+                        action = f"ADD_{int(adjusted_add_ratio * 100)}"
+                        reason = f"股票加仓评分{buy_score}，盈利{profit_rate * 100:.1f}%且趋势强劲，可加仓"
+                        buy_signal = True
+                        ai_signal = "ADD"
+                    else:
+                        reason = f"持仓中，买入评分{buy_score}/卖出评分{sell_score}，暂不操作"
+                else:
+                    reason = f"持仓中，买入评分{buy_score}/卖出评分{sell_score}，暂不操作"
         else:
-            if stop_loss_triggered or (profit_rate is not None and profit_rate <= stop_loss and current_price < ma20):
-                action = "SELL_ALL"
-                reason = f"卖出评分{sell_score}，触发动态止损或固定止损"
-                sell_signal = True
-                ai_signal = "SELL"
-            elif sell_score >= 78 and profit_rate is not None and profit_rate < 0:
-                action = "SELL_ALL"
-                reason = f"卖出评分{sell_score}，亏损叠加趋势/市场风险"
-                sell_signal = True
-                ai_signal = "SELL"
-            elif sell_score >= 75:
-                action = "SELL_PARTIAL"
-                reason = f"卖出评分{sell_score}，风险升高或达到止盈区，建议减仓"
-                sell_signal = True
-                ai_signal = "REDUCE"
-            elif buy_score >= 75 and profit_rate is not None and profit_rate >= add_profit_threshold and can_add_position and market_data["market_filter"] != "BLOCK":
-                adjusted_add_ratio = add_ratio * (0.7 if market_data["market_filter"] == "CAUTION" else 1)
-                action = f"ADD_{int(adjusted_add_ratio * 100)}"
-                reason = f"买入评分{buy_score}，盈利{profit_rate * 100:.1f}%且未超过仓位上限，可加仓"
-                buy_signal = True
-                ai_signal = "ADD"
+            # ETF策略：保持原有逻辑
+            if not has_position:
+                if cooldown_remaining > 0:
+                    reason = f"冷却期剩余{cooldown_remaining}天，暂停买入"
+                elif buy_score >= 70 and market_data["market_filter"] != "BLOCK":
+                    adjusted_buy_ratio = buy_ratio * (0.7 if market_data["market_filter"] == "CAUTION" else 1)
+                    action = f"BUY_{int(adjusted_buy_ratio * 100)}"
+                    reason = f"买入评分{buy_score}，趋势/动量/市场过滤满足试仓条件"
+                    buy_signal = True
+                    ai_signal = "BUY"
+                else:
+                    reason = f"买入评分{buy_score}未达阈值或市场过滤偏谨慎，继续观察"
             else:
-                reason = f"持仓中，买入评分{buy_score}/卖出评分{sell_score}，暂不操作"
+                if stop_loss_triggered or (profit_rate is not None and profit_rate <= stop_loss and current_price < ma20):
+                    action = "SELL_ALL"
+                    reason = f"卖出评分{sell_score}，触发动态止损或固定止损"
+                    sell_signal = True
+                    ai_signal = "SELL"
+                elif sell_score >= 78 and profit_rate is not None and profit_rate < 0:
+                    action = "SELL_ALL"
+                    reason = f"卖出评分{sell_score}，亏损叠加趋势/市场风险"
+                    sell_signal = True
+                    ai_signal = "SELL"
+                elif sell_score >= 75:
+                    action = "SELL_PARTIAL"
+                    reason = f"卖出评分{sell_score}，风险升高或达到止盈区，建议减仓"
+                    sell_signal = True
+                    ai_signal = "REDUCE"
+                elif buy_score >= 75 and profit_rate is not None and profit_rate >= add_profit_threshold and can_add_position and market_data["market_filter"] != "BLOCK":
+                    adjusted_add_ratio = add_ratio * (0.7 if market_data["market_filter"] == "CAUTION" else 1)
+                    action = f"ADD_{int(adjusted_add_ratio * 100)}"
+                    reason = f"买入评分{buy_score}，盈利{profit_rate * 100:.1f}%且未超过仓位上限，可加仓"
+                    buy_signal = True
+                    ai_signal = "ADD"
+                else:
+                    reason = f"持仓中，买入评分{buy_score}/卖出评分{sell_score}，暂不操作"
 
         ai_confidence = round(max(buy_score, sell_score, 100 - risk_score) / 100, 2)
         if risk_score >= 70:
@@ -625,6 +716,9 @@ class EtfSignalService:
             "technical_snapshot": technical_snapshot,
             "template_name": template_name,
             "params": params,
+            "instrument_type": instrument_type,
+            "strategy_profile": strategy_profile,
+            "breakout_score": round(breakout_score, 1),
         }
 
     @staticmethod

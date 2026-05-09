@@ -102,6 +102,7 @@ class EtfWatch(Base):
     quantity = Column(Integer, nullable=True)           # 持仓股数
     last_stop_loss_date = Column(Date, nullable=True)   # 上次止损日期（用于冷却期）
     template_name = Column(String(20), default="CORE")  # 绑定的策略模板
+    instrument_type = Column(String(10), default="ETF")  # ETF 或 STOCK
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     signals = relationship("EtfSignal", back_populates="etf_watch", cascade="all, delete-orphan")

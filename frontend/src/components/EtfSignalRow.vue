@@ -1,7 +1,10 @@
 <template>
   <tr :class="refreshingRow ? 'table-warning' : ''">
     <td>
-      <strong>{{ sig.symbol }}</strong><br>
+      <strong>{{ sig.symbol }}</strong>
+      <span v-if="sig.instrument_type === 'ETF'" class="badge bg-primary ms-1" style="font-size:0.65rem;">ETF</span>
+      <span v-else-if="sig.instrument_type === 'STOCK'" class="badge bg-info ms-1" style="font-size:0.65rem;">股票</span>
+      <br>
       <small class="text-muted">{{ sig.name || '' }}</small>
     </td>
     <!-- 信号 -->
@@ -14,6 +17,9 @@
     <!-- 原因 -->
     <td class="reason-cell" :title="fullReason(sig)">
       <div class="small fw-semibold text-dark">{{ sig.reason || '—' }}</div>
+      <div v-if="sig.strategy_profile" class="small text-muted">
+        策略：{{ sig.strategy_profile === 'ETF_TREND' ? 'ETF趋势' : '股票突破' }}
+      </div>
       <div class="small text-muted reason-scores">
         买 {{ formatScore(sig.buy_score) }} / 卖 {{ formatScore(sig.sell_score) }} / 风险 {{ formatScore(sig.risk_score) }}
       </div>
