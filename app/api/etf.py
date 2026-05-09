@@ -26,6 +26,22 @@ _CACHE_TTL = 20  # seconds
 _cache_lock = threading.Lock()
 _computing = False
 
+_EXTENDED_SIGNAL_FIELDS = [
+    "signal_score", "buy_score", "sell_score", "risk_score",
+    "trend_score", "volume_score", "momentum_score", "position_score", "score_breakdown",
+    "trend_strength", "trend_level", "rsi", "rsi_signal", "atr", "atr_pct",
+    "dynamic_stop_price", "dynamic_stop_loss_pct", "stop_loss_triggered",
+    "market_symbol", "market_trend", "market_filter", "market_score", "market_reason",
+    "market_rsi", "market_trend_strength", "breakout_strength", "breakout_quality",
+    "position_ratio", "max_position_ratio", "can_add_position",
+    "ai_summary", "ai_signal", "ai_confidence", "ai_risk_level",
+    "decision_factors", "technical_snapshot",
+]
+
+
+def _extended_signal_fields(result: dict) -> dict:
+    return {key: result.get(key) for key in _EXTENDED_SIGNAL_FIELDS}
+
 
 # ----- Watch list -----
 
@@ -195,6 +211,7 @@ def get_etf_signal(symbol: str, market: str = "CN", db: Session = Depends(get_db
         rise_from_low_pct=result.get("rise_from_low_pct"),
         signal_date=datetime.now(),
         calculated_at=datetime.now(),
+        **_extended_signal_fields(result),
     )
 
     return response
@@ -298,6 +315,7 @@ def list_etf_signals(db: Session = Depends(get_db)):
                 rise_from_low_pct=result.get("rise_from_low_pct"),
                 signal_date=datetime.now(),
                 calculated_at=datetime.now(),
+                **_extended_signal_fields(result),
             ))
             # SELL_ALL 后：写入止损日期、清空持仓
             if result.get("action") == "SELL_ALL":

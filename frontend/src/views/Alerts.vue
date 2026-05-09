@@ -1,5 +1,5 @@
 <template>
-  <div class="container mt-4">
+  <div class="container-fluid mt-4 px-3">
     <!-- Toast -->
     <div class="toast-container">
       <div v-for="t in toasts" :key="t.id" class="toast show align-items-center text-white" :class="'bg-' + t.type" role="alert">
@@ -18,7 +18,7 @@
 
     <!-- Header Stats -->
     <div class="row mb-4">
-      <div class="col-md-3">
+      <div class="col-md-2">
         <div class="card text-white clickable-card" :class="filterMode === 'buy' ? 'bg-success border-3 border-dark' : (buyCount > 0 ? 'bg-success' : 'bg-secondary')"
              @click="toggleFilter('buy')">
           <div class="card-body py-2">
@@ -27,7 +27,7 @@
           </div>
         </div>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-2">
         <div class="card text-white clickable-card" :class="filterMode === 'sell' ? 'bg-danger border-3 border-dark' : (sellCount > 0 ? 'bg-danger' : 'bg-secondary')"
              @click="toggleFilter('sell')">
           <div class="card-body py-2">
@@ -36,7 +36,7 @@
           </div>
         </div>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-2">
         <div class="card text-dark clickable-card" :class="filterMode === 'hold' ? 'bg-warning border-3 border-dark' : 'bg-warning'"
              @click="toggleFilter('hold')">
           <div class="card-body py-2">
@@ -45,12 +45,22 @@
           </div>
         </div>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-2">
         <div class="card text-white clickable-card" :class="filterMode === 'holding' ? 'bg-info border-3 border-dark' : 'bg-info'"
              @click="toggleFilter('holding')">
           <div class="card-body py-2">
             <h6 class="card-title mb-1"><i class="bi bi-wallet2 me-2"></i>持有</h6>
             <h3 class="mb-0">{{ holdingCount }}</h3>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card" :class="totalProfitLoss >= 0 ? 'border-danger' : 'border-success'" style="border-width:2px;">
+          <div class="card-body py-2">
+            <h6 class="card-title mb-1"><i class="bi bi-currency-exchange me-2"></i>总盈亏</h6>
+            <h3 class="mb-0" :class="totalProfitLoss >= 0 ? 'text-danger' : 'text-success'">
+              {{ totalProfitLoss >= 0 ? '+' : '' }}{{ totalProfitLoss.toFixed(0) }} 元
+            </h3>
           </div>
         </div>
       </div>
@@ -105,6 +115,11 @@
                 <th>代码</th>
                 <th>信号</th>
                 <th>原因</th>
+                <th>评分</th>
+                <th>趋势强度</th>
+                <th>RSI</th>
+                <th>ATR止损</th>
+                <th>市场</th>
                 <th>趋势</th>
                 <th>回调</th>
                 <th>情绪</th>
@@ -332,6 +347,7 @@ const buyCount = computed(() => signals.value.filter(s => s.buy_signal).length)
 const sellCount = computed(() => signals.value.filter(s => s.sell_signal).length)
 const holdCount = computed(() => signals.value.filter(s => !s.buy_signal && !s.sell_signal).length)
 const holdingCount = computed(() => signals.value.filter(s => s.quantity && s.quantity > 0).length)
+const totalProfitLoss = computed(() => signals.value.reduce((sum, s) => sum + (s.profit_loss || 0), 0))
 
 const filteredSignals = computed(() => {
   let result = signals.value

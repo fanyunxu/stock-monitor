@@ -205,5 +205,49 @@ class EtfSignalWithMeta(BaseModel):
     is_high_position: Optional[bool] = None   # 是否高位（连续涨≥3天）
     rise_from_low_pct: Optional[float] = None  # 从20日低点上涨百分比
 
+    # 评分策略字段
+    signal_score: Optional[float] = None
+    buy_score: Optional[float] = None
+    sell_score: Optional[float] = None
+    risk_score: Optional[float] = None
+    trend_score: Optional[float] = None
+    volume_score: Optional[float] = None
+    momentum_score: Optional[float] = None
+    position_score: Optional[float] = None
+    score_breakdown: Optional[dict] = None
+
+    # 技术指标扩展
+    trend_strength: Optional[float] = None
+    trend_level: Optional[str] = None
+    rsi: Optional[float] = None
+    rsi_signal: Optional[str] = None
+    atr: Optional[float] = None
+    atr_pct: Optional[float] = None
+    dynamic_stop_price: Optional[float] = None
+    dynamic_stop_loss_pct: Optional[float] = None
+    stop_loss_triggered: Optional[bool] = None
+
+    # 市场过滤与突破质量
+    market_symbol: Optional[str] = None
+    market_trend: Optional[str] = None
+    market_filter: Optional[str] = None
+    market_score: Optional[float] = None
+    market_reason: Optional[str] = None
+    market_rsi: Optional[float] = None
+    market_trend_strength: Optional[float] = None
+    breakout_strength: Optional[float] = None
+    breakout_quality: Optional[str] = None
+
+    # 仓位和 AI 兼容字段
+    position_ratio: Optional[float] = None
+    max_position_ratio: Optional[float] = None
+    can_add_position: Optional[bool] = None
+    ai_summary: Optional[str] = None
+    ai_signal: Optional[str] = None
+    ai_confidence: Optional[float] = None
+    ai_risk_level: Optional[str] = None
+    decision_factors: Optional[List[str]] = None
+    technical_snapshot: Optional[dict] = None
+
     class Config:
         from_attributes = True

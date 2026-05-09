@@ -1,5 +1,5 @@
 <template>
-  <div class="container mt-4">
+  <div class="container-fluid mt-4 px-3">
     <!-- Toast -->
     <div class="toast-container">
       <div v-for="t in toasts" :key="t.id" class="toast show align-items-center text-white" :class="'bg-' + t.type" role="alert">
@@ -111,6 +111,11 @@
                 <th>ETF</th>
                 <th>信号</th>
                 <th>原因</th>
+                <th>评分</th>
+                <th>趋势强度</th>
+                <th>RSI</th>
+                <th>ATR止损</th>
+                <th>市场</th>
                 <th>趋势</th>
                 <th>回调</th>
                 <th>情绪</th>

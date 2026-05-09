@@ -25,7 +25,9 @@ class StockService:
         # 15xxxx-16xxxx: Shenzhen ETF (funds)
         # 002: SME board
         # 001: Shanghai
-        if symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+        if symbol == "000300":
+            prefix = "sh"
+        elif symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
             prefix = "sz"
         elif symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
             prefix = "sz"  # Shenzhen ETF funds
@@ -142,7 +144,11 @@ class StockService:
             return [
                 {
                     "price": float(row["Close"]),
-                    "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,
                     "timestamp": row.name.to_pydatetime()
                 }
                 for _, row in hist.iterrows()
@@ -156,7 +162,9 @@ class StockService:
         symbol = symbol.upper().strip()
         
         # Determine Sina prefix
-        if symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+        if symbol == "000300":
+            prefix = "sh"
+        elif symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
             prefix = "sz"
         elif symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
             prefix = "sz"
@@ -227,7 +235,9 @@ class StockService:
         symbol = symbol.upper().strip()
 
         # Determine Sina prefix
-        if symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+        if symbol == "000300":
+            prefix = "sh"
+        elif symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
             prefix = "sz"
         elif symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
             prefix = "sz"
@@ -251,8 +261,13 @@ class StockService:
             if isinstance(data, list) and len(data) > 0:
                 result = []
                 for item in data[-days:]:
+                    close = float(item["close"])
                     result.append({
-                        "price": float(item["close"]),
+                        "price": close,
+                        "open": float(item.get("open", close)),
+                        "high": float(item.get("high", close)),
+                        "low": float(item.get("low", close)),
+                        "close": close,
                         "volume": float(item["volume"]),
                         "timestamp": datetime.strptime(item["day"], "%Y-%m-%d")
                     })
@@ -262,7 +277,9 @@ class StockService:
             pass
 
         # Fallback to EastMoney
-        if symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+        if symbol == "000300":
+            secid_prefix = "1"
+        elif symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
             secid_prefix = "0"
         elif symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
             secid_prefix = "0"
@@ -288,8 +305,13 @@ class StockService:
             result = []
             for kline in klines:
                 parts = kline.split(",")
+                close = float(parts[2])
                 result.append({
-                    "price": float(parts[2]),
+                    "price": close,
+                    "open": float(parts[1]),
+                    "high": float(parts[3]),
+                    "low": float(parts[4]),
+                    "close": close,
                     "volume": float(parts[5]),
                     "timestamp": datetime.strptime(parts[0], "%Y%m%d")
                 })
