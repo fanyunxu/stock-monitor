@@ -37,7 +37,8 @@ provide('navState', navState)
 
 function switchTab(tab, opts = {}) {
   if (tab === 'simple') {
-    navState.visible = false
+    window.location.href = '/idea'
+    return
   }
   activeTab.value = tab
 }

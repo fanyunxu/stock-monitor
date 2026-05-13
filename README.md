@@ -1,108 +1,116 @@
 # 盯盘助手 (Stock Monitor)
 
-A web-based stock & ETF monitoring dashboard for Chinese A-share and US/HK markets.
+A web-based ETF & stock signal monitoring dashboard for Chinese A-share markets.
 
-**版本**: 后端 v2.1 | 前端 v1.8
+**版本**: 后端 v2.2 | 前端 v1.9
+
+---
 
 ## 功能特性
 
-- **股票关注列表** — 支持 A股、美股、港股，实时价格 + 日涨跌
-- **价格告警** — 按连续涨跌天数触发，支持微信/IYUU 推送
-- **ETF 信号监控** — 28 只 ETF 持仓追踪，趋势/买入/卖出信号自动计算
+- **ETF/股票信号监控** — 支持 A股 ETF 和个股，趋势、买入/卖出信号自动计算
+- **持仓管理** — 录入成本价和股数，实时显示盈亏
+- **多信号筛选** — 按买入/卖出/观望/持有状态筛选
 - **服务器监控** — CPU、内存、磁盘健康状态
-- **告警历史** — 触发记录查看与确认
+- **自动刷新** — 每 30 秒自动刷新信号
+
+---
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 后端 | Python 3.11 + FastAPI |
+| 后端 | Python 3.10 + FastAPI |
 | 前端 | Vue 3 + Vite + Bootstrap 5 |
 | 数据库 | PostgreSQL |
-| 数据源 | yfinance（美股）、AKShare（A 股）|
+| 数据源 | AKShare（A 股）|
+
+---
 
 ## 项目结构
 
 ```
 stock-monitor/
 ├── app/
-│   ├── api/           # API 路由
-│   │   ├── alerts.py      # 告警规则 CRUD
-│   │   ├── etf.py         # ETF 持仓 & 信号
-│   │   ├── stocks.py      # 股票关注列表
-│   │   └── system.py      # 系统信息、健康检查
-│   ├── models/         # SQLAlchemy 模型
-│   ├── schemas/        # Pydantic 请求/响应模型
-│   ├── services/       # 业务逻辑
-│   │   ├── alert_service.py      # 告警检测
-│   │   ├── etf_signal_service.py # ETF 信号计算
-│   │   ├── stock_service.py      # 行情获取
+│   ├── api/
+│   │   ├── etf.py          # ETF/股票持仓 & 信号（路由: /api/stocks）
+│   │   ├── alerts.py       # 告警规则（已废弃，前端未使用）
+│   │   └── system.py       # 系统信息、健康检查
+│   ├── models/             # SQLAlchemy 模型
+│   ├── schemas/            # Pydantic 请求/响应模型
+│   ├── services/
+│   │   ├── etf_signal_service.py  # ETF 信号计算
+│   │   ├── stock_service.py       # 行情获取（AKShare）
 │   │   └── notification_service.py # 微信/IYUU 推送
-│   └── main.py         # FastAPI 入口
+│   └── main.py             # FastAPI 入口
 ├── frontend/
 │   └── src/
-│       ├── App.vue         # 根组件（Tab 导航）
-│       ├── views/          # 页面视图
-│       │   ├── Dashboard.vue    # 首页（股票卡片 + ETF 信号表）
-│       │   ├── Alerts.vue       # 告警规则
-│       │   ├── EtfSignals.vue   # ETF 信号详情
-│       │   ├── History.vue      # 告警历史
+│       ├── App.vue              # 根组件（Tab 导航）
+│       ├── views/
+│       │   ├── Alerts.vue      # 信号页面（主页面）
+│       │   ├── EtfSignals.vue   # ETF 信号详情（备用）
 │       │   ├── Server.vue       # 服务器监控
-│       │   └── Logs.vue         # 运行日志
-│       └── components/     # 可复用组件
-│           ├── StockCard.vue       # 个股卡片
-│           ├── AlertRuleItem.vue   # 告警规则项
-│           ├── AlertHistoryItem.vue # 告警历史项
-│           ├── ServerInfo.vue      # 服务器信息卡片
-│           └── EtfSignalRow.vue    # ETF 信号行
-├── static/              # 生产构建产物（后端直接 serve）
-├── config.yaml          # 应用配置
-├── requirements.txt     # Python 依赖
-├── Dockerfile
-└── docker-compose.yml
+│       │   ├── Logs.vue         # 运行日志
+│       │   ├── Dashboard.vue    # 控制台
+│       │   └── Idea.vue         # 极简模式
+│       └── components/
+│           └── EtfSignalRow.vue  # 信号行组件
+├── static/                 # 前端构建产物（后端直接 serve）
+├── config.yaml             # 应用配置
+├── requirements.txt        # Python 依赖
+├── run.sh                  # 一键启动脚本
+└── migrate_add_instrument_type.py  # 数据库迁移
 ```
+
+---
 
 ## 快速启动
 
-### 1. 配置数据库
+### 1. 确认环境
 
-确保 PostgreSQL 可用，数据库 `stock_monitor` 已创建。
+- Python 3.10+
+- Node.js 18+
+- PostgreSQL（数据库 `stock_monitor` 已存在）
 
 ### 2. 启动后端
 
 ```bash
 cd stock-monitor
+
+# 安装依赖
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 配置环境变量（或修改 config.yaml）
+# 启动服务（会自动构建前端）
+bash run.sh
+```
+
+或者手动启动：
+
+```bash
+source venv/bin/activate
 export DATABASE_HOST=192.168.0.12
 export DATABASE_PORT=35432
 export DATABASE_NAME=stock_monitor
 export DATABASE_USER=postgres
 export DATABASE_PASSWORD=2342ccbd
 
-# 启动
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 3. 前端开发（如需修改 UI）
+访问 **http://localhost:8000**
+
+### 3. 前端开发
 
 ```bash
 cd frontend
 npm install
 npm run dev      # 开发模式（端口 5173）
-npm run build   # 构建产物输出到 ../static/
+npm run build     # 构建产物输出到 ../static/
 ```
 
-### 4. Docker 部署
-
-```bash
-docker-compose up -d
-```
-
-访问 **http://localhost:8000**（默认打开 ETF 信号页面）
+---
 
 ## 配置文件（config.yaml）
 
@@ -114,10 +122,20 @@ database:
   user: "postgres"
   password: "2342ccbd"
 
+app:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+
+stock:
+  default_market: "CN"
+
 alert:
-  check_interval: 1  # 分钟，0=禁用
-  iyuu_token: "YOUR_IYUU_TOKEN"  # IYUU 通知令牌
+  check_interval: 0  # 告警检查间隔（分钟），0=禁用
+  iyuu_token: "YOUR_IYUU_TOKEN"
 ```
+
+---
 
 ## 环境变量
 
@@ -129,59 +147,72 @@ alert:
 | `DATABASE_USER` | 用户名 | postgres |
 | `DATABASE_PASSWORD` | 密码 | 2342ccbd |
 
+---
+
 ## API 接口
 
-### 股票
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/stocks` | 关注列表（含实时价格） |
-| POST | `/api/stocks` | 添加股票 |
-| DELETE | `/api/stocks/{symbol}` | 移除股票 |
+> **说明**：项目已移除旧股票列表功能，所有标的（ETF 和个股）统一通过 `/api/stocks` 接口管理。
 
-### 告警规则
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/alerts` | 所有规则 |
-| POST | `/api/alerts` | 创建规则 |
-| PUT | `/api/alerts/{id}` | 更新规则 |
-| DELETE | `/api/alerts/{id}` | 删除规则 |
-| POST | `/api/alerts/{id}/toggle` | 启用/禁用 |
+### 持仓管理
 
-### ETF
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/etf/watch` | ETF 持仓列表 |
-| POST | `/api/etf/watch` | 添加 ETF |
-| PATCH | `/api/etf/watch/{symbol}` | 更新持仓成本/数量 |
-| DELETE | `/api/etf/watch/{symbol}` | 删除 ETF |
-| GET | `/api/etf/signals` | ETF 信号列表（首页展示） |
-| POST | `/api/etf/signals/refresh-all` | 刷新所有信号 |
+| GET | `/api/stocks/watch` | 获取所有关注标的 |
+| POST | `/api/stocks/watch` | 添加标的到关注列表 |
+| PATCH | `/api/stocks/watch/{symbol}` | 更新标的持仓成本/数量 |
+| DELETE | `/api/stocks/watch/{symbol}` | 从关注列表移除 |
+
+**添加/更新持仓示例：**
+```bash
+# 添加
+curl -X POST http://localhost:8000/api/stocks/watch \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "515700", "market": "CN", "instrument_type": "ETF"}'
+
+# 更新持仓
+curl -X PATCH http://localhost:8000/api/stocks/watch/515700 \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "515700", "cost": 2.872, "quantity": 300}'
+```
+
+### 信号查询
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/stocks/signals` | 获取所有标的最新信号（含盈亏） |
+| GET | `/api/stocks/signals/{symbol}` | 获取单个标的信号 |
 
 ### 系统
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/version` | 版本信息 |
 | GET | `/api/server` | 服务器监控数据 |
+| GET | `/api/logs` | 运行日志 |
 | GET | `/health` | 健康检查 |
 
-完整文档访问 **http://localhost:8000/docs**
+完整 API 文档访问 **http://localhost:8000/docs**
 
-## 股票代码格式
+---
 
-| 市场 | 示例 | 格式 |
-|------|------|------|
-| A 股 | 上证 600000 | 600000.SS |
-| A 股 | 深证 000001 | 000001.SZ |
-| 港股 | 腾讯 00700 | 00700.HK |
-| 美股 | 苹果 AAPL | AAPL |
+## 标的代码格式
+
+| 市场 | 示例 | 格式说明 |
+|------|------|----------|
+| A 股 ETF | 512480 | 510xxx（沪）/ 159xxx（深） |
+| A 股个股 | 600000 / 000001 | 600xxx（沪）/ 000xxx（深） |
+| 创业板 ETF | 159915 | 159xxx 为深交所 ETF |
+
+`instrument_type` 字段：`ETF` 或 `STOCK`
+
+---
 
 ## 页面说明
 
-访问 http://localhost:8000 后，默认进入 **ETF 信号** 页面，左侧导航栏可切换：
+访问 http://localhost:8000 后：
 
-- 📊 **控制台** — 股票卡片 + ETF 信号表
-- 🔔 **告警规则** — 管理价格告警
-- 📈 **ETF 信号** — ETF 完整信号详情
-- 📋 **告警历史** — 触发记录
-- 🖥️ **服务器监控** — 系统资源
-- 📝 **运行日志** — 应用日志
+- **📊 信号**（默认）— 所有 ETF/股票信号，支持筛选和搜索
+- **📈 信号详情** — 完整信号指标（备用）
+- **🖥️ 服务器监控** — 系统资源状态
+- **📝 运行日志** — 应用日志
+- **⚡ 极简模式** — 纯文字版，适合快速浏览

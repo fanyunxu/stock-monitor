@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models import Base, engine, SessionLocal, get_db
 from app.models.models import AlertRule, Stock, AppSetting
-from app.api import stocks, alerts, system, etf
+from app.api import alerts, system, etf
 from app.services.alert_service import AlertService
 
 # Create database tables
@@ -148,9 +148,6 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Include routers
-app.include_router(stocks.router)
-app.include_router(alerts.router)
-app.include_router(system.router)
 app.include_router(etf.router)
 
 
@@ -171,6 +168,11 @@ def simple_shortcut():
 def idea_mode():
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/idea.html")
+
+@app.get("/p")
+def positions_mode():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/positions.html")
 
 
 @app.get("/api/market/index")

@@ -374,7 +374,7 @@ function openEditModal(sig) {
 
 async function editEtfHoldings() {
   try {
-    const r = await fetch(`${API}/etf/watch/${editForm.value.symbol}`, {
+    const r = await fetch(`${API}/stocks/watch/${editForm.value.symbol}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -396,7 +396,7 @@ async function editEtfHoldings() {
 
 async function loadWatchList() {
   try {
-    const r = await fetch(`${API}/etf/watch`)
+    const r = await fetch(`${API}/stocks/watch`)
     if (r.ok) watchList.value = await r.json()
   } catch (e) { showToast('加载关注列表失败', 'danger') }
 }
@@ -406,7 +406,7 @@ async function loadSignals() {
   refreshing.value = true
   refreshProgress.value = 0
   try {
-    const r = await fetch(`${API}/etf/signals`)
+    const r = await fetch(`${API}/stocks/signals`)
     if (!r.ok) throw new Error(await r.text())
     signals.value = await r.json()
     lastRefresh.value = Date.now()
@@ -426,7 +426,7 @@ async function addEtf() {
   const sym = addForm.value.symbol.trim().toUpperCase()
   if (!sym) { showToast('请输入代码', 'warning'); return }
   try {
-    const r = await fetch(`${API}/etf/watch`, {
+    const r = await fetch(`${API}/stocks/watch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -454,7 +454,7 @@ async function addEtf() {
 async function removeEtf(symbol) {
   if (!confirm(`确定要从关注列表移除 ${symbol} 吗？`)) return
   try {
-    const r = await fetch(`${API}/etf/watch/${symbol}`, { method: 'DELETE' })
+    const r = await fetch(`${API}/stocks/watch/${symbol}`, { method: 'DELETE' })
     if (!r.ok) throw new Error('删除失败')
     showToast(`${symbol} 已移除`, 'success')
     await loadWatchList()

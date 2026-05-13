@@ -68,12 +68,10 @@
 
     <!-- Signals Card -->
     <div class="card mb-4">
-      <div v-if="refreshing" class="progress-bar-animated" style="height:3px;background:var(--bs-primary);transition:width 0.3s;"></div>
 
       <div class="card-header d-flex justify-content-between align-items-center">
         <div class="d-flex align-items-center gap-2">
           <h5 class="mb-0"><i class="bi bi-activity me-2"></i>股票信号 <span class="badge bg-secondary ms-1">{{ signals.length }}</span></h5>
-          <span v-if="refreshing" class="spinner-border spinner-border-sm text-primary" role="status"></span>
           <small v-if="lastRefreshText || !refreshing" class="text-muted" style="font-size:0.7rem;">
             {{ lastRefreshText }}
             <span v-if="lastRefreshText"> | </span>{{ nextRefreshText }}
@@ -90,16 +88,6 @@
         </div>
       </div>
       <div class="card-body p-0">
-        <div v-if="refreshing" class="px-3 pt-2">
-          <div class="d-flex align-items-center gap-2 mb-2">
-            <div class="progress flex-grow-1" style="height:6px;">
-              <div class="progress-bar bg-primary" :style="{ width: refreshProgress + '%' }"></div>
-            </div>
-            <small class="text-muted" style="font-size:0.7rem;min-width:60px;text-align:right;">{{ refreshProgress }}%</small>
-          </div>
-          <small class="text-muted" style="font-size:0.7rem;">正在更新 {{ refreshSymbol || '...' }} ...</small>
-        </div>
-
         <div v-if="loading && signals.length === 0" class="text-center py-5">
           <div class="spinner-border text-primary"></div>
           <p class="mt-2 text-muted">正在计算信号...</p>
@@ -148,7 +136,7 @@
                 :refreshing="refreshing"
                 @edit="openEditModal"
                 @remove="removeItem"
-                @rule="openRuleModal"
+                
               />
             </tbody>
           </table>
@@ -169,6 +157,13 @@
               <label for="stockSymbol" class="form-label">代码</label>
               <input v-model="addForm.symbol" type="text" class="form-control" id="stockSymbol" placeholder="例如：512480、159915、600000">
               <div class="form-text">ETF（510xxx/159xxx）或股票（600xxx/000xxx）</div>
+            </div>
+            <div class="mb-3">
+              <label for="stockType" class="form-label">类型</label>
+              <select v-model="addForm.instrument_type" class="form-select" id="stockType">
+                <option value="ETF">ETF（指数基金）</option>
+                <option value="STOCK">股票（个股）</option>
+              </select>
             </div>
             <div class="mb-3">
               <label for="stockTemplate" class="form-label">策略模板</label>
@@ -224,6 +219,13 @@
               </div>
             </div>
             <div class="mb-3">
+              <label for="editType" class="form-label">类型</label>
+              <select v-model="editForm.instrument_type" class="form-select" id="editType">
+                <option value="ETF">ETF（指数基金）</option>
+                <option value="STOCK">股票（个股）</option>
+              </select>
+            </div>
+            <div class="mb-3">
               <label for="editTemplate" class="form-label">策略模板</label>
               <select v-model="editForm.template_name" class="form-select" id="editTemplate">
                 <option value="CORE">CORE（稳健型）- 止损-5% 止盈5%</option>
@@ -238,81 +240,7 @@
         </div>
       </div>
     </div>
-
-    <!-- Alert Rule Modal -->
-    <div class="modal fade" id="ruleModal" tabindex="-1">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">
-              <i :class="editingRuleId ? 'bi bi-pencil me-2' : 'bi bi-plus-circle me-2'"></i>{{ editingRuleId ? '编辑告警规则' : '添加告警规则' }}
-            </h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-          </div>
-          <div class="modal-body">
-            <input type="hidden" v-model="ruleForm.ruleId">
-
-            <div class="mb-3">
-              <label for="ruleStock" class="form-label">股票</label>
-              <select v-model="ruleForm.stockId" class="form-select" id="ruleStock">
-                <option value="">请选择股票...</option>
-                <option v-for="s in stocks" :key="s.id" :value="s.id">{{ s.symbol }} - {{ s.name || s.symbol }}</option>
-              </select>
-            </div>
-
-            <div class="mb-3">
-              <label for="ruleAlertType" class="form-label">告警类型</label>
-              <select v-model="ruleForm.alertType" class="form-select" id="ruleAlertType">
-                <option value="rise">📈 趋势上涨（几天内涨幅超阈值）</option>
-                <option value="fall">📉 趋势下跌（几天内跌幅超阈值）</option>
-                <option value="above">🚨 价格高于（突破指定价格上限）</option>
-                <option value="below">🔻 价格低于（跌破指定价格下限）</option>
-              </select>
-            </div>
-
-            <div v-show="ruleForm.alertType === 'rise' || ruleForm.alertType === 'fall'">
-              <div class="mb-3">
-                <label for="ruleThreshold" class="form-label">涨跌幅阈值 (%)</label>
-                <input v-model="ruleForm.threshold" type="number" class="form-control" id="ruleThreshold" step="0.1" min="0.1" placeholder="5">
-                <div class="form-text">价格变动超过此百分比时触发告警</div>
-              </div>
-              <div class="mb-3">
-                <label for="ruleDays" class="form-label">统计天数</label>
-                <input v-model="ruleForm.days" type="number" class="form-control" id="ruleDays" min="1" placeholder="1">
-                <div class="form-text">计算价格变动的天数周期</div>
-              </div>
-            </div>
-
-            <div v-show="ruleForm.alertType === 'above' || ruleForm.alertType === 'below'">
-              <div class="mb-3">
-                <label for="ruleTargetPrice" class="form-label">目标价格</label>
-                <input v-model="ruleForm.targetPrice" type="number" class="form-control" id="ruleTargetPrice" step="0.01" min="0.01" placeholder="100.00">
-                <div class="form-text">当价格突破此值时触发告警</div>
-              </div>
-            </div>
-
-            <div class="mb-3">
-              <label for="ruleCooldown" class="form-label">重复触发冷却（分钟）</label>
-              <input v-model="ruleForm.cooldown" type="number" class="form-control" id="ruleCooldown" value="0" min="0" placeholder="0=不限制">
-              <div class="form-text">0=每次满足条件都记录；>0=上次触发后等待指定分钟才再次记录</div>
-            </div>
-
-            <div v-show="ruleForm.alertType === 'rise' || ruleForm.alertType === 'fall'">
-              <div class="mb-3">
-                <label for="ruleFollowup" class="form-label">续警阈值 (%)</label>
-                <input v-model="ruleForm.followupThreshold" type="number" class="form-control" id="ruleFollowup" step="0.1" min="0.1" placeholder="1">
-                <div class="form-text">首次预警后，价格再波动超过此比例则续警（默认1%）</div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-            <button type="button" class="btn btn-primary" @click="saveRule">保存规则</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+</div>
 </template>
 
 <script setup>
@@ -322,14 +250,10 @@ import EtfSignalRow from '../components/EtfSignalRow.vue'
 const API = '/api'
 
 const signals = ref([])
-const stocks = ref([])
-const rules = ref([])
 const loading = ref(false)
 const toasts = ref([])
-const addForm = ref({ symbol: '', template_name: 'CORE', cost: null, quantity: null })
-const editForm = ref({ symbol: '', template_name: 'CORE', cost: null, quantity: null })
-const ruleForm = ref({ ruleId: null, stockId: '', alertType: 'rise', threshold: 5, days: 1, targetPrice: '', cooldown: 0, followupThreshold: 1 })
-const editingRuleId = ref(null)
+const addForm = ref({ symbol: '', template_name: 'CORE', cost: null, quantity: null, instrument_type: 'ETF' })
+const editForm = ref({ symbol: '', template_name: 'CORE', cost: null, quantity: null, instrument_type: 'ETF' })
 const filterMode = ref('all')
 const searchQuery = ref('')
 
@@ -417,7 +341,7 @@ function showAddModal() {
 }
 
 function openEditModal(sig) {
-  editForm.value = { symbol: sig.symbol, template_name: sig.template_name || 'CORE', cost: sig.cost || null, quantity: sig.quantity || null }
+  editForm.value = { symbol: sig.symbol, template_name: sig.template_name || 'CORE', cost: sig.cost || null, quantity: sig.quantity || null, instrument_type: sig.instrument_type || 'ETF' }
   new window.bootstrap.Modal(document.getElementById('editModal')).show()
 }
 
@@ -447,10 +371,10 @@ async function openRuleModal(sig) {
 
 async function saveEdit() {
   try {
-    const r = await fetch(`${API}/etf/watch/${editForm.value.symbol}`, {
+    const r = await fetch(`${API}/stocks/watch/${editForm.value.symbol}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cost: editForm.value.cost, quantity: editForm.value.quantity, template_name: editForm.value.template_name })
+      body: JSON.stringify({ symbol: editForm.value.symbol, cost: editForm.value.cost, quantity: editForm.value.quantity, template_name: editForm.value.template_name, instrument_type: editForm.value.instrument_type })
     })
     if (!r.ok) throw new Error('更新失败')
     window.bootstrap.Modal.getInstance(document.getElementById('editModal'))?.hide()
@@ -464,7 +388,7 @@ async function loadSignals() {
   refreshing.value = true
   refreshProgress.value = 0
   try {
-    const r = await fetch(`${API}/etf/signals`)
+    const r = await fetch(`${API}/stocks/signals`)
     if (!r.ok) throw new Error(await r.text())
     signals.value = await r.json()
     lastRefresh.value = Date.now()
@@ -484,7 +408,7 @@ async function addItem() {
   const sym = addForm.value.symbol.trim().toUpperCase()
   if (!sym) { showToast('请输入代码', 'warning'); return }
   try {
-    const r = await fetch(`${API}/etf/watch`, {
+    const r = await fetch(`${API}/stocks/watch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -492,6 +416,7 @@ async function addItem() {
         cost: addForm.value.cost || undefined,
         quantity: addForm.value.quantity || undefined,
         template_name: addForm.value.template_name || 'CORE',
+        instrument_type: addForm.value.instrument_type || 'ETF',
       })
     })
     if (!r.ok) {
@@ -507,7 +432,7 @@ async function addItem() {
 async function removeItem(symbol) {
   if (!confirm(`确定要从列表移除 ${symbol} 吗？`)) return
   try {
-    const r = await fetch(`${API}/etf/watch/${symbol}`, { method: 'DELETE' })
+    const r = await fetch(`${API}/stocks/watch/${symbol}`, { method: 'DELETE' })
     if (!r.ok) throw new Error('删除失败')
     showToast(`${symbol} 已移除`, 'success')
     await loadSignals()
@@ -630,8 +555,7 @@ function stopAutoRefresh() {
   if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
 }
 
-onMounted(async () => {
-  await Promise.all([loadSignals(), loadStocks(), loadRules()])
+onMounted(async () => { await loadSignals()
   startAutoRefresh()
 })
 

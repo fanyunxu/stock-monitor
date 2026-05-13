@@ -187,7 +187,7 @@ async function loadStocks() {
       fetch(`${API}/stocks`),
       fetch(`${API}/alerts`),
       fetch(`${API}/alerts/logs`),
-      fetch(`${API}/etf/signals`),
+      fetch(`${API}/stocks/signals`),
     ])
     stocks.value = await sr.json()
     alerts.value = ar.ok ? await ar.json() : []

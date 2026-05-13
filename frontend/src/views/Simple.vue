@@ -72,7 +72,7 @@ async function load() {
     // 并行获取指数和ETF信号
     const [indexData, signalsRes] = await Promise.all([
       fetchIndex(),
-      fetch(`${API}/etf/signals`).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
+      fetch(`${API}/stocks/signals`).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
     ])
 
     const signals = signalsRes

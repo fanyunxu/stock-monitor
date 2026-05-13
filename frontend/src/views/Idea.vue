@@ -111,7 +111,7 @@ async function load() {
   try {
     const [indexData, signalsRes] = await Promise.all([
       fetchIndex(),
-      fetch(`${API}/etf/signals`).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
+      fetch(`${API}/stocks/signals`).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
     ])
 
     const signals = signalsRes
@@ -126,7 +126,9 @@ async function load() {
     }
 
     if (holdings.length > 0) {
-      lines.push(`📦 关注 (${holdings.length})`)
+      const totalProfit = holdings.reduce((sum, s) => sum + (s.profit_loss || 0), 0)
+      const totalStr = totalProfit >= 0 ? `+${totalProfit.toFixed(0)}` : `${totalProfit.toFixed(0)}`
+      lines.push(`📦 关注 (${holdings.length}) ${totalStr}元`)
       lines.push('─'.repeat(40))
       holdings.forEach(s => {
         const price = s.current_price != null ? s.current_price.toFixed(3) : '—'
@@ -220,7 +222,7 @@ body {
 }
 #content {
   font-family: "JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-all;
@@ -229,7 +231,7 @@ body {
 }
 #decoy {
   font-family: "JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-all;

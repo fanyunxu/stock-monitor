@@ -15,7 +15,7 @@ from app.schemas.schemas import (
 from app.services.etf_signal_service import EtfSignalService
 from app.services.stock_service import StockService
 
-router = APIRouter(prefix="/api/etf", tags=["etf"])
+router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
 # 并行线程池，最大同时计算 15 个 ETF 信号
 _etf_executor = ThreadPoolExecutor(max_workers=15)
@@ -98,6 +98,11 @@ def update_etf_holdings(symbol: str, data: EtfWatchCreate, db: Session = Depends
         etf.instrument_type = data.instrument_type
     db.commit()
     db.refresh(etf)
+    # Invalidate signals cache so next request gets fresh data
+    from app.api.etf import _cache_lock, _cache
+    with _cache_lock:
+        _cache["data"] = None
+        _cache["timestamp"] = 0
     return etf
 
 
@@ -109,6 +114,11 @@ def remove_etf_watch(symbol: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="ETF 未找到")
     db.delete(etf)
     db.commit()
+    # Invalidate signals cache so next request gets fresh data
+    from app.api.etf import _cache_lock, _cache
+    with _cache_lock:
+        _cache["data"] = None
+        _cache["timestamp"] = 0
     return MessageResponse(message=f"ETF {symbol} 已从关注列表移除")
 
 
@@ -173,12 +183,10 @@ def get_etf_signal(symbol: str, market: str = "CN", db: Session = Depends(get_db
         except Exception:
             pass
 
-    # SELL_ALL 后：写入止损日期、清空持仓（先更新DB，再返回）
+    # SELL_ALL 后：写入止损日期（不再自动清空持仓）
     if etf and result.get("action") == "SELL_ALL":
         from datetime import date as date_cls
         etf.last_stop_loss_date = date_cls.today()
-        etf.cost = None
-        etf.quantity = None
         db.commit()
 
     response = EtfSignalWithMeta(
@@ -253,7 +261,7 @@ def list_etf_signals(db: Session = Depends(get_db)):
             if _cache["data"] is not None and (now - _cache["timestamp"]) < _CACHE_TTL:
                 return _cache["data"]
 
-        watch_list = db.query(EtfWatch).filter(EtfWatch.enabled == True).all()
+        watch_list = db.query(EtfWatch).filter(EtfWatch.enabled == True).order_by(EtfWatch.id).all()
         results = []
         to_calc = []
 
@@ -281,13 +289,19 @@ def list_etf_signals(db: Session = Depends(get_db)):
                 return None
 
         futures = [_etf_executor.submit(calc_one, args) for args in to_calc]
-        for future in as_completed(futures):
+        # 按提交顺序收集（as_completed 不保证顺序），最后按原顺序拼接
+        results_dict = {}  # idx -> (result, etf)
+        for idx, future in enumerate(futures):
             res = future.result()
             if res is None:
                 continue
             result, etf = res
             if "error" in result:
                 continue
+            results_dict[idx] = (result, etf)
+
+        for idx in sorted(results_dict.keys()):
+            result, etf = results_dict[idx]
             results.append(EtfSignalWithMeta(
                 symbol=etf.symbol,
                 name=etf.name or etf.symbol,
@@ -325,12 +339,14 @@ def list_etf_signals(db: Session = Depends(get_db)):
                 calculated_at=datetime.now(),
                 **_extended_signal_fields(result),
             ))
-            # SELL_ALL 后：写入止损日期、清空持仓
+
+        # SELL_ALL 后：写入止损日期（不再清空持仓，避免误触发后数据丢失）
+        for idx in sorted(results_dict.keys()):
+            result, etf = results_dict[idx]
             if result.get("action") == "SELL_ALL":
                 from datetime import date as date_cls
                 etf.last_stop_loss_date = date_cls.today()
-                etf.cost = None
-                etf.quantity = None
+                # 注意：不再自动清空持仓，由人工判断是否卖出
                 db.commit()
 
         # Update cache
@@ -341,6 +357,52 @@ def list_etf_signals(db: Session = Depends(get_db)):
         return results
     finally:
         _computing = False
+
+
+@router.get("/positions", response_model=List[dict])
+def list_positions(db: Session = Depends(get_db)):
+    """
+    持仓实时行情（不做缓存，每次实时请求腾讯接口）。
+    只返回 quantity > 0 的持仓，返回：
+    - symbol, name, current_price, daily_return, cost, quantity, profit_loss
+    """
+    watch_list = db.query(EtfWatch).filter(
+        EtfWatch.enabled == True,
+        EtfWatch.quantity != None,
+        EtfWatch.quantity > 0
+    ).order_by(EtfWatch.id).all()
+
+    results = []
+    for etf in watch_list:
+        price_info = None
+        try:
+            price_info = StockService.get_stock_info(etf.symbol, etf.market or "CN")
+        except Exception:
+            pass
+
+        current_price = price_info.get("current_price") if price_info else None
+        previous_price = price_info.get("previous_price") if price_info else None
+        daily_return = None
+        if current_price and previous_price:
+            daily_return = round((current_price - previous_price) / previous_price * 100, 2)
+
+        cost = float(etf.cost) if etf.cost else None
+        quantity = etf.quantity
+        profit_loss = None
+        if cost and quantity and current_price:
+            profit_loss = round((current_price - cost) * quantity, 2)
+
+        results.append({
+            "symbol": etf.symbol,
+            "name": etf.name or etf.symbol,
+            "current_price": current_price,
+            "daily_return": daily_return,
+            "cost": cost,
+            "quantity": quantity,
+            "profit_loss": profit_loss,
+        })
+
+    return results
 
 
 @router.post("/signals/refresh-all", response_model=MessageResponse)

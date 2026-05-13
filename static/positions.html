@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>持仓</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #3C3F41; color: #d4d4d4; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .container { max-width: 800px; margin: 0 auto; padding: 0 16px; background: #3C3F41; min-height: 100vh; }
+    .meta { display: flex; gap: 16px; font-size: 0.8rem; color: #666; border-bottom: 1px solid #333; padding: 10px 0; }
+    .meta span { display: flex; align-items: center; gap: 4px; }
+    .count { margin-left: auto; color: #888; }
+    #content { font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; color: #d4d4d4; background: transparent; }
+    .up { color: #e06c75; }
+    .down { color: #98c379; }
+    .title { color: #61afef; font-weight: bold; }
+    .divider { color: #555; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="meta" id="meta">
+    <span>⏱ <span id="lastRefresh">—</span></span>
+    <span>🔄 <span id="countdown">5</span>s</span>
+    <span class="count">📦 持仓 (<span id="holdingsCount">0</span>)</span>
+  </div>
+  <pre id="content">加载中...</pre>
+</div>
+
+<script>
+const API = '/api'
+const REFRESH_INTERVAL = 5
+
+let countdownSec = REFRESH_INTERVAL
+let countdownTimer = null
+let dataTimer = null
+
+function fmtTime(date) {
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function setCountdown(v) {
+  document.getElementById('countdown').textContent = v
+}
+
+async function loadPositions() {
+  try {
+    const r = await fetch(`${API}/stocks/positions`)
+    if (!r.ok) throw new Error(r.statusText)
+    const signals = await r.json()
+
+    // 只保留持仓（API已过滤）
+    const holdings = signals.filter(s => s.quantity && s.quantity > 0)
+    document.getElementById('holdingsCount').textContent = holdings.length
+
+    const lines = []
+    if (holdings.length === 0) {
+      lines.push('📦 暂无持仓')
+    } else {
+      const totalProfit = holdings.reduce((sum, s) => sum + (s.profit_loss || 0), 0)
+      const totalStr = totalProfit >= 0 ? `+${Math.round(totalProfit)}` : `${Math.round(totalProfit)}`
+      lines.push(`📦 持仓 (${holdings.length})  盈亏 ${totalStr}元`)
+      lines.push('─'.repeat(45))
+      holdings.forEach(s => {
+        const price = s.current_price != null ? s.current_price.toFixed(3) : '—'
+        const change = s.daily_return != null
+          ? (s.daily_return >= 0 ? `+${s.daily_return.toFixed(2)}%` : `${s.daily_return.toFixed(2)}%`)
+          : '—'
+        const profitVal = s.profit_loss != null ? Math.round(s.profit_loss) : null
+        let profitStr = '—'
+        if (profitVal !== null) {
+          if (profitVal > 0) profitStr = `+${profitVal}`
+          else if (profitVal < 0) profitStr = `${profitVal}`
+          else profitStr = '0'  // 盈亏刚好为0时不显示+/-前缀
+        }
+        const cost = s.cost != null ? s.cost.toFixed(3) : '—'
+
+        const changeClass = s.daily_return >= 0 ? 'up' : 'down'
+        const profitClass = s.profit_loss >= 0 ? 'up' : 'down'
+
+        lines.push(`${s.name || s.symbol}（${s.symbol}）`)
+        lines.push(`  ${price} ${changeClass == 'up' ? '▲' : '▼'} ${change}  成本 ${cost}  盈 ${profitStr}元`)
+      })
+    }
+
+    document.getElementById('content').textContent = lines.join('\n')
+
+    // 用服务端数据时间
+    const calcAt = signals.length > 0 && signals[0].calculated_at
+      ? new Date(signals[0].calculated_at)
+      : new Date()
+    document.getElementById('lastRefresh').textContent = fmtTime(calcAt)
+
+    countdownSec = REFRESH_INTERVAL
+    setCountdown(countdownSec)
+  } catch (e) {
+    document.getElementById('content').textContent = '加载失败: ' + e.message
+  }
+}
+
+function startCountdown() {
+  countdownTimer = setInterval(() => {
+    countdownSec--
+    if (countdownSec < 0) countdownSec = REFRESH_INTERVAL
+    setCountdown(countdownSec)
+  }, 1000)
+}
+
+// 双击隐藏内容，显示假日志
+let hidden = false
+document.addEventListener('dblclick', () => {
+  hidden = !hidden
+  document.getElementById('content').style.display = hidden ? 'none' : 'block'
+  document.getElementById('meta').style.display = hidden ? 'none' : 'flex'
+})
+
+loadPositions()
+startCountdown()
+dataTimer = setInterval(loadPositions, REFRESH_INTERVAL * 1000)
+</script>
+</body>
+</html>
