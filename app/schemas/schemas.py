@@ -255,5 +255,27 @@ class EtfSignalWithMeta(BaseModel):
     strategy_profile: Optional[str] = None  # ETF_TREND 或 STOCK_BREAKOUT
     breakout_score: Optional[float] = None  # 突破评分（股票策略用）
 
+    # MACD 指标
+    macd: Optional[float] = None
+    macd_signal: Optional[float] = None
+    macd_histogram: Optional[float] = None
+
+    # Bollinger Bands 布林带
+    bollinger_upper: Optional[float] = None
+    bollinger_lower: Optional[float] = None
+    bollinger_mid: Optional[float] = None
+    bollinger_bandwidth: Optional[float] = None
+    bollinger_position: Optional[float] = None
+
+    # 周线趋势
+    weekly_trend: Optional[str] = None
+
+    # 信号质量
+    signal_quality: Optional[str] = None  # HIGH_CONFIDENCE / NORMAL / LOW_CONFIDENCE
+    suggested_position_size: Optional[float] = None
+
+    # 交易日检测
+    is_trading_day: Optional[bool] = None
+
     class Config:
         from_attributes = True

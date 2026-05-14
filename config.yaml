@@ -16,3 +16,11 @@ stock:
 alert:
   check_interval: 0  # alert check interval in minutes, 0=disabled
   iyuu_token: "IYUU48964T890653b5a87bb9cb844d59d5920c0b3e5fb9b935"  # IYUU 通知令牌
+
+ai:
+  provider: "minimax"
+  api_key: "YOUR_MINIMAX_API_KEY"
+  base_url: "https://api.minimax.chat/v1"
+  model: "minimax-text-01"
+  cache_ttl: 1800  # 30 minutes
+  enabled: true

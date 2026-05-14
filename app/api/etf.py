@@ -37,6 +37,9 @@ _EXTENDED_SIGNAL_FIELDS = [
     "ai_summary", "ai_signal", "ai_confidence", "ai_risk_level",
     "decision_factors", "technical_snapshot",
     "instrument_type", "strategy_profile", "breakout_score",
+    "macd", "macd_signal", "macd_histogram",
+    "bollinger_upper", "bollinger_lower", "bollinger_mid", "bollinger_bandwidth", "bollinger_position",
+    "weekly_trend", "signal_quality", "suggested_position_size", "is_trading_day",
 ]
 
 
@@ -161,18 +164,6 @@ def get_etf_signal(symbol: str, market: str = "CN", db: Session = Depends(get_db
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
-    # 尝试获取 ETF 名称
-    name = symbol
-    if etf and etf.name:
-        name = etf.name
-    else:
-        try:
-            info = StockService.get_stock_info(symbol, market)
-            name = info.get("name") or name
-        except Exception:
-            pass
-
-    # 尝试获取 ETF 名称
     name = symbol
     if etf and etf.name:
         name = etf.name

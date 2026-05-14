@@ -72,6 +72,9 @@
           <input v-model="searchQuery" type="text" class="form-control form-control-sm" placeholder="代码/名称搜索" style="width:130px;">
         </div>
         <div>
+          <button class="btn btn-outline-secondary btn-sm me-2" @click="showAiSettings" title="AI 配置">
+            <i class="bi bi-gear me-1"></i>AI
+          </button>
           <button class="btn btn-outline-primary btn-sm me-2" @click="loadSignals" :disabled="refreshing">
             <i class="bi bi-arrow-clockwise me-1"></i>{{ refreshing ? '刷新中...' : '刷新' }}
           </button>
@@ -144,6 +147,7 @@
                 :refreshing="refreshing"
                 @edit="openEditModal"
                 @remove="removeEtf"
+                @ai-analyze="openAiModal"
               />
             </tbody>
           </table>
@@ -217,6 +221,54 @@
       </div>
     </div>
 
+    <!-- AI Analysis Modal -->
+    <AiAnalysisModal
+      v-if="aiModal.symbol"
+      :ref="el => aiModalRef = el"
+      :symbol="aiModal.symbol"
+      :name="aiModal.name"
+      :instrument-type="aiModal.instrument_type"
+      :signal-data="aiModal.signal_data"
+    />
+
+    <!-- AI Settings Modal -->
+    <div class="modal fade" id="aiSettingsModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-gear me-2"></i>AI 分析配置</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="aiApiKey" class="form-label">API Key <span class="text-danger">*</span></label>
+              <input v-model="aiSettings.api_key" type="password" class="form-control" id="aiApiKey"
+                     placeholder="输入 MiniMax API Key">
+              <div class="form-text">当前: {{ aiSettingsStatus }}</div>
+            </div>
+            <div class="mb-3">
+              <label for="aiBaseUrl" class="form-label">Base URL</label>
+              <input v-model="aiSettings.base_url" type="text" class="form-control" id="aiBaseUrl"
+                     placeholder="https://api.minimax.chat/v1">
+            </div>
+            <div class="mb-3">
+              <label for="aiModel" class="form-label">模型</label>
+              <input v-model="aiSettings.model" type="text" class="form-control" id="aiModel"
+                     placeholder="minimax-text-01">
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input v-model="aiSettings.enabled" class="form-check-input" type="checkbox" id="aiEnabled">
+              <label class="form-check-label" for="aiEnabled">启用 AI 分析</label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button type="button" class="btn btn-primary" @click="saveAiSettings">保存配置</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Edit Holdings Modal -->
     <div class="modal fade" id="editHoldingsModal" tabindex="-1">
       <div class="modal-dialog">
@@ -275,6 +327,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import EtfSignalRow from '../components/EtfSignalRow.vue'
+import AiAnalysisModal from '../components/AiAnalysisModal.vue'
 
 const API = '/api'
 const AUTO_REFRESH_INTERVAL = 30 * 1000
@@ -287,6 +340,10 @@ const addForm = ref({ symbol: '', name: '', initial_capital: 2000, cost: null, q
 const editForm = ref({ symbol: '', cost: null, quantity: null, template_name: 'CORE', instrument_type: 'ETF' })
 const filterMode = ref('all')
 const searchQuery = ref('')
+const aiModalRef = ref(null)
+const aiModal = ref({ symbol: '', name: '', instrument_type: 'ETF', signal_data: {} })
+const aiSettings = ref({ api_key: '', base_url: 'https://api.minimax.chat/v1', model: 'minimax-text-01', enabled: true })
+const aiSettingsStatus = ref('加载中...')
 
 const refreshing = ref(false)
 const refreshingSymbol = ref('')
@@ -370,6 +427,55 @@ function showAddModal() {
 function openEditModal(sig) {
   editForm.value = { symbol: sig.symbol, cost: sig.cost || null, quantity: sig.quantity || null, template_name: sig.template_name || 'CORE', instrument_type: sig.instrument_type || 'ETF' }
   new window.bootstrap.Modal(document.getElementById('editHoldingsModal')).show()
+}
+
+async function showAiSettings() {
+  try {
+    const r = await fetch(`${API}/ai/settings`)
+    if (r.ok) {
+      const data = await r.json()
+      aiSettings.value.api_key = ''
+      aiSettings.value.base_url = data.base_url || 'https://api.minimax.chat/v1'
+      aiSettings.value.model = data.model || 'minimax-text-01'
+      aiSettings.value.enabled = data.enabled !== false
+      aiSettingsStatus.value = data.configured ? '已配置 ' + data.api_key : '未配置'
+    }
+  } catch (e) {
+    aiSettingsStatus.value = '读取失败'
+  }
+  new bootstrap.Modal(document.getElementById('aiSettingsModal')).show()
+}
+
+async function saveAiSettings() {
+  const body = {}
+  if (aiSettings.value.api_key) body.api_key = aiSettings.value.api_key
+  body.base_url = aiSettings.value.base_url
+  body.model = aiSettings.value.model
+  body.enabled = aiSettings.value.enabled
+  try {
+    const r = await fetch(`${API}/ai/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error('保存失败')
+    bootstrap.Modal.getInstance(document.getElementById('aiSettingsModal'))?.hide()
+    showToast('AI 配置已保存', 'success')
+  } catch (e) {
+    showToast(e.message, 'danger')
+  }
+}
+
+function openAiModal(sig) {
+  aiModal.value = {
+    symbol: sig.symbol,
+    name: sig.name || '',
+    instrument_type: sig.instrument_type || 'ETF',
+    signal_data: { ...sig },
+  }
+  setTimeout(() => {
+    if (aiModalRef.value) aiModalRef.value.show()
+  }, 50)
 }
 
 async function editEtfHoldings() {

@@ -145,6 +145,9 @@
     </td>
     <!-- 操作 -->
     <td>
+      <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" @click="$emit('ai-analyze', sig)" title="AI 智能分析" :disabled="refreshing">
+        <i class="bi bi-robot"></i>
+      </button>
       <button class="btn btn-outline-primary btn-sm py-0 px-1 me-1" @click="$emit('edit', sig)" title="编辑持仓" :disabled="refreshing">
         <i class="bi bi-pencil"></i>
       </button>
@@ -165,7 +168,7 @@ defineProps({
   refreshing: { type: Boolean, default: false },
 })
 
-defineEmits(['edit', 'remove', 'rule'])
+defineEmits(['edit', 'remove', 'rule', 'ai-analyze'])
 
 function formatScore(score) {
   return score != null ? score.toFixed(0) : '—'

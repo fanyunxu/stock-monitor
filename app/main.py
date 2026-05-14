@@ -147,8 +147,11 @@ app.add_middleware(
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+from app.api import ai
+
 # Include routers
 app.include_router(etf.router)
+app.include_router(ai.router)
 
 
 @app.get("/", include_in_schema=False)
@@ -166,6 +169,11 @@ def simple_shortcut():
 
 @app.get("/idea")
 def idea_mode():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/idea.html")
+
+@app.get("/i")
+def idea_shortcut():
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/idea.html")
 

@@ -23,7 +23,6 @@
   <div class="meta" id="meta">
     <span>⏱ <span id="lastRefresh">—</span></span>
     <span>🔄 <span id="countdown">5</span>s</span>
-    <span class="count">📦 持仓 (<span id="holdingsCount">0</span>)</span>
   </div>
   <pre id="content">加载中...</pre>
 </div>
@@ -50,9 +49,7 @@ async function loadPositions() {
     if (!r.ok) throw new Error(r.statusText)
     const signals = await r.json()
 
-    // 只保留持仓（API已过滤）
-    const holdings = signals.filter(s => s.quantity && s.quantity > 0)
-    document.getElementById('holdingsCount').textContent = holdings.length
+    const holdings = signals
 
     const lines = []
     if (holdings.length === 0) {
