@@ -131,14 +131,14 @@
     </td>
     <!-- 盈亏额 -->
     <td class="text-end">
-      <span v-if="sig.profit_loss != null" :class="sig.profit_loss >= 0 ? 'text-danger fw-bold' : 'text-success'">
+      <span v-if="sig.quantity && sig.quantity > 0 && sig.profit_loss != null" :class="sig.profit_loss >= 0 ? 'text-danger fw-bold' : 'text-success'">
         {{ sig.profit_loss >= 0 ? '+' : '' }}{{ sig.profit_loss.toFixed(0) }}
       </span>
       <span v-else class="text-muted">—</span>
     </td>
     <!-- 盈亏% -->
     <td class="text-end">
-      <span v-if="sig.profit_loss_pct != null" :class="sig.profit_loss_pct >= 0 ? 'text-danger fw-bold' : 'text-success'">
+      <span v-if="sig.quantity && sig.quantity > 0 && sig.profit_loss_pct != null" :class="sig.profit_loss_pct >= 0 ? 'text-danger fw-bold' : 'text-success'">
         {{ sig.profit_loss_pct >= 0 ? '+' : '' }}{{ sig.profit_loss_pct.toFixed(1) }}%
       </span>
       <span v-else class="text-muted">—</span>
