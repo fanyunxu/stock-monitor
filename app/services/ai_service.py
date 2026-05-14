@@ -4,7 +4,7 @@ AI Analysis Service — MiniMax LLM integration for stock analysis.
 Features:
 - OpenAI-compatible API client for MiniMax
 - Prompt builder with technical + news + concept data
-- EastMoney news scraper (个股新闻)
+- Multi-source news scrapers (EastMoney, Sina Finance, CnInfo)
 - Concept/sector hot topic detection
 - 30-minute result cache
 """
@@ -13,11 +13,15 @@ import json
 import time
 import threading
 import os
+import re
 import yaml
 import requests
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
+from collections import Counter
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 
 
@@ -219,6 +223,128 @@ def _fetch_stock_news_fallback(symbol: str, name: str = "") -> List[NewsItem]:
         return []
 
 
+def _strip_html(text: str) -> str:
+    """Remove HTML tags from text."""
+    return re.sub(r'<[^>]+>', '', text)
+
+
+def _fetch_sina_news(keyword: str) -> List[NewsItem]:
+    """Fetch stock-related news from Sina Finance."""
+    try:
+        url = "https://feed.mix.sina.com.cn/api/roll/get"
+        params = {
+            "pageid": "153",
+            "lid": "2509",
+            "k": keyword,
+            "num": 6,
+            "page": 1,
+        }
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        items = []
+        for n in (data.get("result", {}).get("data", []) or [])[:6]:
+            ctime = n.get("ctime", "")
+            date_str = datetime.fromtimestamp(int(ctime)).strftime("%Y-%m-%d") if ctime else ""
+            items.append(NewsItem(
+                title=_strip_html(n.get("title", "")),
+                summary=n.get("intro", "")[:200],
+                date=date_str,
+                source="新浪财经",
+            ))
+        return items
+    except Exception:
+        return []
+
+
+def _fetch_cninfo_news(keyword: str) -> List[NewsItem]:
+    """Fetch corporate disclosures from CnInfo (巨潮资讯)."""
+    try:
+        url = "http://www.cninfo.com.cn/new/fulltextSearch/full"
+        params = {
+            "searchkey": keyword,
+            "sdate": (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"),
+            "edate": datetime.now().strftime("%Y-%m-%d"),
+            "isfulltext": "false",
+            "sortName": "pubdate",
+            "sortType": "desc",
+            "pageNum": 1,
+            "pageSize": 5,
+        }
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "http://www.cninfo.com.cn/"}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        items = []
+        for n in (data.get("announcements", []) or [])[:5]:
+            ts = n.get("announcementTime", 0)
+            date_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d") if ts else ""
+            type_name = n.get("announcementTypeName") or ""
+            items.append(NewsItem(
+                title=_strip_html(n.get("announcementTitle", "")),
+                summary=f"{n.get('secName', '')} {type_name}".strip(),
+                date=date_str,
+                source="巨潮资讯",
+            ))
+        return items
+    except Exception:
+        return []
+
+
+def _deduplicate_news(news_list: List[NewsItem], threshold: float = 0.65) -> List[NewsItem]:
+    """Remove duplicate news items by title similarity. Keeps the first occurrence."""
+    seen = []
+    for item in news_list:
+        is_dup = False
+        for s in seen:
+            if SequenceMatcher(None, item.title, s.title).ratio() > threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            seen.append(item)
+    return seen
+
+
+def _fetch_all_news(symbol: str, name: str = "") -> List[NewsItem]:
+    """Fetch news from multiple sources in parallel and merge."""
+    keyword = name or symbol
+    all_news = []
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_fetch_news, symbol): "东方财富公告",
+            executor.submit(_fetch_stock_news_fallback, symbol, name): "东方财富新闻",
+            executor.submit(_fetch_sina_news, keyword): "新浪财经",
+            executor.submit(_fetch_cninfo_news, keyword): "巨潮资讯",
+        }
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    all_news.extend(result)
+            except Exception:
+                pass
+
+    # Deduplicate, sort by date descending (empty dates last)
+    all_news = _deduplicate_news(all_news)
+    all_news.sort(key=lambda x: (x.date if x.date else ""), reverse=True)
+
+    # Ensure source diversity: max 4 per source, then take top 10
+    balanced = []
+    source_counts: Dict[str, int] = {}
+    for item in all_news:
+        cnt = source_counts.get(item.source, 0)
+        if cnt < 4:
+            balanced.append(item)
+            source_counts[item.source] = cnt + 1
+        if len(balanced) >= 10:
+            break
+    return balanced
+
+
 def _fetch_concepts(symbol: str) -> List[ConceptTag]:
     """Fetch concept/sector tags for a stock."""
     prefix = _determine_market_prefix(symbol)
@@ -278,7 +404,7 @@ SYSTEM_PROMPT = """你是一位专业的A股投资分析师，拥有20年经验�
 分析要求：
 1. **综合研判**：一句话总结当前标的状态和操作建议
 2. **技术面分析**：解读趋势、均线、MACD、RSI、布林带等指标的含义和信号
-3. **消息面分析**：解读相关新闻对标的的影响
+3. **消息面分析**：解读相关新闻对标的的影响。如有多个来源同时报道同一事件，说明信息可信度更高，应重点关注；不同来源的观点分歧也需指出
 4. **板块热点**：分析所属概念板块的当前热度和机会
 5. **风险提示**：列出主要风险点（技术面+消息面）
 6. **操作建议**：基于综合判断给出具体的操作方向和仓位建议
@@ -372,11 +498,16 @@ def build_prompt(
         parts.append(f"- 理由: {reason}")
     parts.append("")
 
-    # News
-    parts.append("## 相关新闻资讯")
+    # News (multi-source)
+    parts.append("## 相关新闻资讯（多源）")
     if news:
-        for i, n in enumerate(news[:5], 1):
-            parts.append(f"{i}. [{n.date}] {n.title}")
+        # Show source summary
+        source_counts = Counter(n.source for n in news)
+        source_summary = " | ".join(f"{src}: {cnt}条" for src, cnt in source_counts.items())
+        parts.append(f"- 来源分布: {source_summary}")
+        parts.append("")
+        for i, n in enumerate(news, 1):
+            parts.append(f"{i}. [{n.date}] [{n.source}] {n.title}")
             if n.summary:
                 parts.append(f"   摘要: {n.summary[:150]}")
     else:
@@ -512,11 +643,9 @@ class AiAnalysisService:
             if cached:
                 return cached
 
-        # Fetch enrichment data
+        # Fetch enrichment data (multi-source news in parallel)
         signal_data = signal_data or {}
-        news = _fetch_news(symbol)
-        if not news:
-            news = _fetch_stock_news_fallback(symbol, name)
+        news = _fetch_all_news(symbol, name)
         concepts = _fetch_concepts(symbol)
         hot_concepts = _fetch_hot_concepts()
 
