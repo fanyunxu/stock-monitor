@@ -9,6 +9,7 @@
         <span class="simple-meta-item">
           <i class="bi bi-arrow-repeat"></i> {{ countdown }}s
         </span>
+        <span class="switch-btn" @click="goIdea" title="切换到Idea模式">Idea模式 ↗</span>
       </div>
       <pre id="content" v-show="!hidden">{{ text || '加载中...' }}</pre>
     </div>
@@ -33,6 +34,10 @@ function formatTime() {
 
 function resetCountdown() {
   countdown.value = 30
+}
+
+function goIdea() {
+  window.location.href = '/idea'
 }
 
 async function fetchIndex() {
@@ -193,6 +198,17 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.switch-btn {
+  margin-left: auto;
+  cursor: pointer;
+  color: #6a6a6a;
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.switch-btn:hover {
+  color: #d4d4d4;
 }
 #content {
   font-family: "JetBrains Mono", "Fira Code", "Consolas", "Monaco", monospace;

@@ -3,6 +3,7 @@
     <div class="idea-meta" v-show="!hidden">
       <span><i class="icon-clock"></i> {{ lastRefresh }}</span>
       <span><i class="icon-refresh"></i> {{ countdown }}s</span>
+      <span class="switch-btn" @click="goSimple" title="切换到极简模式">极简模式 ↗</span>
     </div>
     <pre id="content" v-show="!hidden">{{ text || '加载中...' }}</pre>
     <pre id="decoy" v-show="hidden">{{ fakeLog }}</pre>
@@ -29,6 +30,10 @@ function formatTime() {
 
 function resetCountdown() {
   countdown.value = 30
+}
+
+function goSimple() {
+  window.location.href = '/?tab=simple'
 }
 
 const logTemplates = [
@@ -115,7 +120,6 @@ async function load() {
     ])
 
     const signals = signalsRes
-    const holdings = signals.filter(s => s.quantity && s.quantity > 0)
     const buys = signals.filter(s => s.buy_signal)
 
     const lines = []
@@ -123,23 +127,6 @@ async function load() {
     if (indexData) {
       const idxChange = indexData.change >= 0 ? `+${indexData.change.toFixed(2)}%` : `${indexData.change.toFixed(2)}%`
       lines.push(`${indexData.name} ${indexData.price} ${idxChange}`)
-    }
-
-    if (holdings.length > 0) {
-      const totalProfit = holdings.reduce((sum, s) => sum + (s.profit_loss || 0), 0)
-      const totalStr = totalProfit >= 0 ? `+${totalProfit.toFixed(0)}` : `${totalProfit.toFixed(0)}`
-      lines.push(`📦 关注 (${holdings.length}) ${totalStr}元`)
-      lines.push('─'.repeat(40))
-      holdings.forEach(s => {
-        const price = s.current_price != null ? s.current_price.toFixed(3) : '—'
-        const change = s.daily_return != null
-          ? (s.daily_return >= 0 ? `+${s.daily_return.toFixed(2)}%` : `${s.daily_return.toFixed(2)}%`)
-          : '—'
-        const profit = s.profit_loss != null
-          ? (s.profit_loss >= 0 ? `+${s.profit_loss.toFixed(0)}` : `${s.profit_loss.toFixed(0)}`)
-          : '—'
-        lines.push(`${s.name || s.symbol}（${s.symbol}）${price} ${change} | ${profit}元`)
-      })
     }
 
     lines.push(`重点关注 (${buys.length})`)
@@ -213,6 +200,17 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.switch-btn {
+  margin-left: auto;
+  cursor: pointer;
+  color: #9a9a9a;
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.switch-btn:hover {
+  color: #d4d4d4;
 }
 .icon-clock::before {
   content: "⏱";
