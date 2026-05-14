@@ -104,6 +104,16 @@ class ConceptTag:
 
 
 @dataclass
+class FuturesQuote:
+    symbol: str          # e.g., "IF", "IC"
+    name: str            # e.g., "沪深300期货"
+    price: float
+    change_pct: float
+    volume: int
+    open_interest: int   # 持仓量
+
+
+@dataclass
 class AiAnalysisResult:
     symbol: str
     analysis: str
@@ -396,25 +406,138 @@ def _fetch_hot_concepts() -> List[ConceptTag]:
 
 
 # =============================================================================
+# Futures Data
+# =============================================================================
+
+def _fetch_futures_data() -> List[FuturesQuote]:
+    """Fetch main stock index futures quotes from EastMoney.
+
+    Fetches continuous main contracts (主力连续) for:
+    IF (沪深300), IC (中证500), IM (中证1000), IH (上证50)
+    """
+    code_map = {
+        "IFM": "沪深300期货",
+        "ICM": "中证500期货",
+        "IMM": "中证1000期货",
+        "IHM": "上证50期货",
+    }
+    try:
+        secids = [f"113.{c}" for c in code_map.keys()]
+        url = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+        params = {
+            "fltt": "2",
+            "fields": "f2,f3,f5,f6,f12,f14",
+            "secids": ",".join(secids),
+        }
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        results = []
+        for item in data.get("data", {}).get("diff", []) or []:
+            code = item.get("f12", "")
+            results.append(FuturesQuote(
+                symbol=code.replace("M", ""),
+                name=code_map.get(code, code),
+                price=item.get("f2", 0) or 0,
+                change_pct=item.get("f3", 0) or 0,
+                volume=item.get("f5", 0) or 0,
+                open_interest=item.get("f6", 0) or 0,
+            ))
+        return results
+    except Exception:
+        return []
+
+
+def _get_futures_delivery_dates() -> List[dict]:
+    """Calculate upcoming stock index futures delivery dates.
+
+    Chinese stock index futures (IF/IC/IM/IH) are listed for:
+    current month, next month, and the next two quarterly months (Mar/Jun/Sep/Dec).
+    Delivery is on the 3rd Friday of the contract month.
+    """
+    from calendar import monthrange
+    from datetime import date as date_type
+
+    def _third_friday(year: int, month: int) -> date_type:
+        first_day = date_type(year, month, 1)
+        days_until_friday = (4 - first_day.weekday()) % 7  # Mon=0, Fri=4
+        first_friday = 1 + days_until_friday
+        third_friday = first_friday + 14
+        return date_type(year, month, third_friday)
+
+    today = date_type.today()
+    quarter_months = {3, 6, 9, 12}
+
+    # Build list of (year, month) for delivery contracts
+    delivery_months = []
+    seen = set()
+
+    # Current month
+    delivery_months.append((today.year, today.month))
+    seen.add((today.year, today.month))
+
+    # Next month
+    if today.month == 12:
+        nm = (today.year + 1, 1)
+    else:
+        nm = (today.year, today.month + 1)
+    if nm not in seen:
+        delivery_months.append(nm)
+        seen.add(nm)
+
+    # Next 2 quarterly months (after the last added month)
+    check_y, check_m = delivery_months[-1]
+    while len(delivery_months) < 4:
+        if check_m == 12:
+            check_y += 1
+            check_m = 1
+        else:
+            check_m += 1
+        if check_m in quarter_months and (check_y, check_m) not in seen:
+            delivery_months.append((check_y, check_m))
+            seen.add((check_y, check_m))
+
+    results = []
+    for year, month in delivery_months:
+        d = _third_friday(year, month)
+        days_left = (d - today).days
+        if days_left < 0:
+            continue
+        contract_code = f"{year % 100:02d}{month:02d}"
+        results.append({
+            "contract_month": f"{year}-{month:02d}",
+            "delivery_date": d.strftime("%Y-%m-%d"),
+            "days_remaining": days_left,
+            "contract_codes": f"IF{contract_code}/IC{contract_code}/IM{contract_code}/IH{contract_code}",
+        })
+
+    return results
+
+
+# =============================================================================
 # Prompt Builder
 # =============================================================================
 
-SYSTEM_PROMPT = """你是一位专业的A股投资分析师，拥有20年经验。基于提供的技术指标数据、新闻资讯和板块热点，给出客观、全面、有洞察力的分析。
+SYSTEM_PROMPT = """你是一位专业的A股投资分析师，拥有20年经验。基于提供的技术指标数据、新闻资讯、板块热点和期货市场数据，给出客观、全面、有洞察力的分析。
 
 分析要求：
 1. **综合研判**：一句话总结当前标的状态和操作建议
 2. **技术面分析**：解读趋势、均线、MACD、RSI、布林带等指标的含义和信号
 3. **消息面分析**：解读相关新闻对标的的影响。如有多个来源同时报道同一事件，说明信息可信度更高，应重点关注；不同来源的观点分歧也需指出
 4. **板块热点**：分析所属概念板块的当前热度和机会
-5. **风险提示**：列出主要风险点（技术面+消息面）
-6. **操作建议**：基于综合判断给出具体的操作方向和仓位建议
+5. **期货市场影响**：分析股指期货（IF/IC/IM/IH）的走势、升贴水结构及交割日效应对现货市场的潜在影响。期货升水（高于现货）反映市场看涨预期，贴水反映看跌预期；临近交割日时期现价差收敛可能带来波动；期货持仓量变化反映多空力量对比
+6. **风险提示**：列出主要风险点（技术面+消息面+期货面）
+7. **操作建议**：基于综合判断给出具体的操作方向和仓位建议
 
 注意：
 - 使用简体中文
-- 控制总字数在500字以内
+- 控制总字数在600字以内
 - 观点要明确，不要模棱两可
 - 风险提示必须具体，不能泛泛而谈
-- 如果是ETF，说明其跟踪的指数方向和行业分布"""
+- 如果是ETF，说明其跟踪的指数方向和行业分布
+- 期货交割日附近市场波动往往加大，需特别提醒风险"""
 
 
 def build_prompt(
@@ -425,6 +548,8 @@ def build_prompt(
     news: List[NewsItem],
     concepts: List[ConceptTag],
     hot_concepts: List[ConceptTag],
+    futures_data: List[FuturesQuote] = None,
+    delivery_dates: List[dict] = None,
 ) -> str:
     """Build the user prompt for AI analysis."""
     parts = []
@@ -538,6 +663,35 @@ def build_prompt(
     parts.append(f"- 市场趋势: {signal_data.get('market_trend', 'NEUTRAL')}")
     parts.append("")
 
+    # Futures market
+    futures_data = futures_data or []
+    delivery_dates = delivery_dates or []
+    if futures_data or delivery_dates:
+        parts.append("## 期货市场与交割日")
+        if futures_data:
+            parts.append("### 股指期货行情（主力连续）")
+            for f in futures_data:
+                parts.append(f"- {f.name}({f.symbol}): 价格{f.price:.1f} 涨跌{f.change_pct:+.2f}% "
+                              f"成交量{f.volume} 持仓量{f.open_interest}")
+            # Add interpretation hints
+            up_count = sum(1 for f in futures_data if f.change_pct > 0)
+            down_count = sum(1 for f in futures_data if f.change_pct < 0)
+            if up_count > down_count:
+                parts.append(f"- 期货整体偏强: {up_count}涨{down_count}跌，市场情绪偏多")
+            elif down_count > up_count:
+                parts.append(f"- 期货整体偏弱: {up_count}涨{down_count}跌，市场情绪偏空")
+            parts.append("")
+        if delivery_dates:
+            parts.append("### 临近交割日")
+            for d in delivery_dates[:3]:
+                urgency = "⚠️ 临近!" if d["days_remaining"] <= 5 else ""
+                parts.append(f"- {d['contract_month']}合约: {d['delivery_date']} "
+                              f"(距今{d['days_remaining']}天) {urgency}")
+                if d["days_remaining"] <= 5:
+                    parts.append(f"  合约代码: {d['contract_codes']}")
+            parts.append("")
+        parts.append("")
+
     # Position info
     profit_rate = signal_data.get("profit_rate")
     if profit_rate is not None:
@@ -551,7 +705,7 @@ def build_prompt(
     prompt = "\n".join(parts)
 
     # Final instruction
-    prompt += "\n\n请给出分析（包含：综合研判、技术面分析、消息面分析、板块热点、风险提示、操作建议）"
+    prompt += "\n\n请给出分析（包含：综合研判、技术面分析、消息面分析、板块热点、期货市场影响、风险提示、操作建议）"
 
     return prompt
 
@@ -648,11 +802,14 @@ class AiAnalysisService:
         news = _fetch_all_news(symbol, name)
         concepts = _fetch_concepts(symbol)
         hot_concepts = _fetch_hot_concepts()
+        futures_data = _fetch_futures_data()
+        delivery_dates = _get_futures_delivery_dates()
 
         # Build prompt
         user_prompt = build_prompt(
             symbol=symbol, name=name, instrument_type=instrument_type,
             signal_data=signal_data, news=news, concepts=concepts, hot_concepts=hot_concepts,
+            futures_data=futures_data, delivery_dates=delivery_dates,
         )
 
         # Call MiniMax
