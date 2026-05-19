@@ -155,11 +155,40 @@ def remove_stock(symbol: str, db: Session = Depends(get_db)):
     stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
     if not stock:
         raise HTTPException(status_code=404, detail="Stock not found")
-    
     db.delete(stock)
     db.commit()
-    
     return MessageResponse(message=f"Stock {symbol} removed successfully")
+
+
+@router.get("/{symbol}", response_model=StockWithPrice)
+def get_stock(symbol: str, db: Session = Depends(get_db)):
+    """Get a single stock by symbol (skip if etf has a signals handler)."""
+    # Let etf router handle signals endpoint
+    if symbol == "signals":
+        raise HTTPException(status_code=404, detail="Not handled by stocks router")
+    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    stock_data = StockWithPrice(
+        id=stock.id,
+        symbol=stock.symbol,
+        name=stock.name,
+        market=stock.market,
+        created_at=stock.created_at
+    )
+    try:
+        info = StockService.get_stock_info(stock.symbol, stock.market)
+        stock_data.name = info.get("name") or stock.name
+        stock_data.current_price = info["current_price"]
+        stock_data.price_change = info.get("price_change")
+        if info.get("previous_price") and info["current_price"]:
+            stock_data.price_change_percent = (
+                (info["current_price"] - info["previous_price"])
+                / info["previous_price"] * 100
+            )
+    except Exception:
+        pass
+    return stock_data
 
 
 @router.get("/{symbol}/price", response_model=StockPriceResponse)

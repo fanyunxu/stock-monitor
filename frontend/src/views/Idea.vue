@@ -112,10 +112,21 @@ async function fetchIndex() {
   }
 }
 
+async function fetchKoreaIndex() {
+  try {
+    const r = await fetch(`${API}/korea_index`)
+    if (!r.ok) throw new Error(r.statusText)
+    return await r.json()
+  } catch {
+    return null
+  }
+}
+
 async function load() {
   try {
-    const [indexData, signalsRes] = await Promise.all([
+    const [indexData, koreaIndexData, signalsRes] = await Promise.all([
       fetchIndex(),
+      fetchKoreaIndex(),
       fetch(`${API}/stocks/signals`).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json() })
     ])
 
@@ -127,6 +138,11 @@ async function load() {
     if (indexData) {
       const idxChange = indexData.change >= 0 ? `+${indexData.change.toFixed(2)}%` : `${indexData.change.toFixed(2)}%`
       lines.push(`${indexData.name} ${indexData.price} ${idxChange}`)
+    }
+
+    if (koreaIndexData) {
+      const kChange = koreaIndexData.change >= 0 ? `+${koreaIndexData.change.toFixed(2)}%` : `${koreaIndexData.change.toFixed(2)}%`
+      lines.push(`${koreaIndexData.name} ${koreaIndexData.price} ${kChange}`)
     }
 
     lines.push(`重点关注 (${buys.length})`)

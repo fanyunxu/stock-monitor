@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models import Base, engine, SessionLocal, get_db
 from app.models.models import AlertRule, Stock, AppSetting
-from app.api import alerts, system, etf
+from app.api import alerts, system, etf, stocks
 from app.services.alert_service import AlertService
 
 # Create database tables
@@ -151,7 +151,29 @@ from app.api import ai
 
 # Include routers
 app.include_router(etf.router)
+app.include_router(stocks.router)
 app.include_router(ai.router)
+
+
+@app.get("/api/korea_index")
+def get_korea_index():
+    """Get Korea KOSPI index via Yahoo Finance (bypasses CORS)."""
+    try:
+        import requests
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11"
+        params = {"interval": "1d", "range": "2d"}
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        result = data["chart"]["result"][0]
+        price = result["meta"]["regularMarketPrice"]
+        prev = result["meta"]["chartPreviousClose"]
+        change = (price - prev) / prev * 100
+        return {"name": "韩国KOSPI", "price": price, "change": change}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/", include_in_schema=False)
