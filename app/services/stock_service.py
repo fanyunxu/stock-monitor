@@ -404,7 +404,7 @@ class StockService:
         if beg:
             end_date = beg
             date_params = f"&beg={beg}&end={end_date}"
-            lmt = max(limit, 60)
+            lmt = max(limit, 250)
         else:
             end_date = "20500101"
             date_params = ""

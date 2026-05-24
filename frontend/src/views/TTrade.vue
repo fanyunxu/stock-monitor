@@ -335,7 +335,7 @@
       <!-- K-line Chart (ECharts) -->
       <div class="card mb-3" v-if="intradayData">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-candlestick-chart me-2"></i>K线图 (5分钟)
+          <span><i class="bi bi-candlestick-chart me-2"></i>K线图 (1分钟)
             <small class="text-muted ms-2">{{ intradayData.bar_count || 0 }} 根</small>
           </span>
           <small class="text-muted">

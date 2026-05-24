@@ -213,7 +213,7 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
     # Step 3: Fetch intraday 5-min klines
     beg_param = target_date.strftime("%Y%m%d") if target_date else None
     try:
-        raw_bars = StockService.get_intraday_klines(symbol, market, klt=5, limit=60, beg=beg_param)
+        raw_bars = StockService.get_intraday_klines(symbol, market, klt=1, limit=250, beg=beg_param)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取分钟K线失败: {e}")
 
@@ -233,7 +233,7 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
     resolved = resolve_intraday_data(raw_bars, current_price, prev_close, target_date=target_date)
 
     # Step 5: Compute indicators (opening range = first 6 bars for 30 min in 5-min kline)
-    ind = compute_intraday_indicators(resolved, opening_range_bars=6)
+    ind = compute_intraday_indicators(resolved, opening_range_bars=30)
 
     # Step 6: Evaluate factors
     factors = evaluate_intraday_factors(ind, resolved)
