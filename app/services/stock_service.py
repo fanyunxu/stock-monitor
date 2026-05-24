@@ -375,6 +375,111 @@ class StockService:
         return StockService.get_stock_info(symbol, market)["current_price"]
 
     @staticmethod
+    def get_intraday_klines(symbol: str, market: str = "CN", klt: int = 1, limit: int = 240) -> list:
+        """Fetch intraday minute-level kline data from EastMoney.
+
+        Args:
+            symbol: stock/ETF symbol
+            market: market code (CN only for now)
+            klt: kline type — 1=1min, 5=5min
+            limit: max bars to return
+
+        Returns:
+            list of {open, high, low, close, volume, timestamp}
+        """
+        if market != "CN":
+            return StockService._get_intraday_klines_yahoo(symbol, market, klt, limit)
+
+        symbol = symbol.upper().strip()
+        if symbol == "000300":
+            secid_prefix = "1"
+        elif symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+            secid_prefix = "0"
+        elif symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
+            secid_prefix = "0"
+        else:
+            secid_prefix = "1"
+
+        em_url = "http://push2his.eastmoney.com/api/qt/stock/kline/get"
+        params_str = (
+            f"secid={secid_prefix}.{symbol}"
+            "&fields1=f1,f2,f3,f4,f5,f6"
+            "&fields2=f51,f52,f53,f54,f55,f56"
+            f"&klt={klt}&fqt=1&end=20500101&lmt={limit}"
+        )
+
+        for attempt in range(3):
+            try:
+                result = subprocess.run(
+                    ["curl", "-s", "--max-time", "15",
+                     "-H", "User-Agent: Mozilla/5.0",
+                     "-H", "Connection: close",
+                     f"{em_url}?{params_str}"],
+                    capture_output=True, text=True, timeout=20
+                )
+                if result.stdout and "klines" in result.stdout:
+                    import json
+                    data = json.loads(result.stdout)
+                    klines = (data.get("data") or {}).get("klines") or []
+                    if not klines:
+                        continue
+                    res = []
+                    for kline in klines:
+                        parts = kline.split(",")
+                        ts_str = parts[0]
+                        # Minute data: "2026-05-24 09:31"; daily data: "2026-05-24"
+                        try:
+                            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M")
+                        except ValueError:
+                            ts = datetime.strptime(ts_str, "%Y-%m-%d")
+                        close = float(parts[2])
+                        res.append({
+                            "open": float(parts[1]),
+                            "high": float(parts[3]),
+                            "low": float(parts[4]),
+                            "close": close,
+                            "volume": float(parts[5]),
+                            "timestamp": ts,
+                        })
+                    return res[-limit:]
+            except Exception:
+                pass
+
+        return []
+
+    @staticmethod
+    def _get_intraday_klines_yahoo(symbol: str, market: str, klt: int, limit: int) -> list:
+        """Fallback: fetch intraday data from Yahoo Finance."""
+        full_symbol = StockService._format_symbol(symbol, market)
+        interval_map = {1: "1m", 5: "5m", 15: "15m", 30: "30m", 60: "60m"}
+        interval = interval_map.get(klt, "5m")
+        try:
+            ticker = yf.Ticker(full_symbol)
+            # 5d covers the current trading day
+            hist = ticker.history(period="5d", interval=interval)
+            if hist.empty:
+                return []
+            today = datetime.now().date()
+            bars = []
+            for ts, row in hist.iterrows():
+                close = float(row["Close"])
+                if math.isnan(close) or math.isinf(close):
+                    continue
+                bars.append({
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": close,
+                    "volume": int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,
+                    "timestamp": ts.to_pydatetime().replace(tzinfo=None) if ts.tzinfo else ts.to_pydatetime(),
+                })
+            # Filter to today only
+            bars = [b for b in bars if b["timestamp"].date() == today]
+            return bars[-limit:]
+        except Exception:
+            return []
+
+    @staticmethod
     def _format_symbol(symbol: str, market: str) -> str:
         """Format ticker symbol per market convention."""
         symbol = symbol.upper().strip()
