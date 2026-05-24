@@ -10,8 +10,10 @@
   "dependencies": {
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.13.1",
+    "echarts": "^6.1.0",
     "marked": "^18.0.3",
-    "vue": "^3.4.0"
+    "vue": "^3.4.0",
+    "vue-echarts": "^8.0.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

@@ -1,8 +1,8 @@
 """做T监测：个股实时买卖点信号"""
-from datetime import datetime
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.models import get_db
 from app.models.models import EtfWatch
 from app.services.etf_signal_service import EtfSignalService
@@ -142,15 +142,28 @@ def get_ttrade_signal(symbol: str, market: str = "CN", db: Session = Depends(get
 
 
 @router.get("/intraday/{symbol}")
-def get_intraday_signal(symbol: str, market: str = "CN", db: Session = Depends(get_db)):
+def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str] = None, db: Session = Depends(get_db)):
     """
     获取日内做T信号（基于分钟级分时数据）。
     返回日线趋势 + 日内信号 + 指标 + 分钟K线数据。
+
+    Query params:
+        req_date: optional date in YYYY-MM-DD format for historical review.
+                  When provided, returns signal_markers for chart annotation.
     """
     from app.services.intraday_engine import (
         resolve_intraday_data, compute_intraday_indicators,
         evaluate_intraday_factors, IntradayDecisionEngine,
+        replay_intraday_signals,
     )
+
+    # Parse target date
+    target_date = None
+    if req_date:
+        try:
+            target_date = datetime.strptime(req_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date格式须为 YYYY-MM-DD")
 
     # Look up holdings
     watch = db.query(EtfWatch).filter(EtfWatch.symbol == symbol.upper()).first()
@@ -187,7 +200,7 @@ def get_intraday_signal(symbol: str, market: str = "CN", db: Session = Depends(g
     except Exception:
         pass
 
-    # Step 2: Get real-time price
+    # Step 2: Get real-time price (for today) or use bar data (for historical)
     name = symbol.upper()
     current_price = None
     try:
@@ -197,20 +210,27 @@ def get_intraday_signal(symbol: str, market: str = "CN", db: Session = Depends(g
     except Exception:
         pass
 
+    # Step 3: Fetch intraday 5-min klines
+    beg_param = target_date.strftime("%Y%m%d") if target_date else None
+    try:
+        raw_bars = StockService.get_intraday_klines(symbol, market, klt=5, limit=60, beg=beg_param)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取分钟K线失败: {e}")
+
+    # For historical dates: derive price from kline data (override real-time)
+    if target_date and raw_bars:
+        current_price = float(raw_bars[-1]["close"])
+        if prev_close is None:
+            prev_close = float(raw_bars[0].get("open", current_price))
+
     if current_price is None:
         raise HTTPException(status_code=500, detail="无法获取实时价格")
 
     if prev_close is None:
         prev_close = current_price
 
-    # Step 3: Fetch intraday 5-min klines (48 bars = full day, readable candlesticks)
-    try:
-        raw_bars = StockService.get_intraday_klines(symbol, market, klt=5, limit=60)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取分钟K线失败: {e}")
-
     # Step 4: Resolve intraday data
-    resolved = resolve_intraday_data(raw_bars, current_price, prev_close)
+    resolved = resolve_intraday_data(raw_bars, current_price, prev_close, target_date=target_date)
 
     # Step 5: Compute indicators (opening range = first 6 bars for 30 min in 5-min kline)
     ind = compute_intraday_indicators(resolved, opening_range_bars=6)
@@ -223,6 +243,19 @@ def get_intraday_signal(symbol: str, market: str = "CN", db: Session = Depends(g
         daily_trend, daily_trend_strength, daily_action,
         factors, ind, resolved, has_position,
     )
+
+    # Step 7b: Replay for historical dates to find buy/sell markers
+    signal_markers = []
+    if target_date and resolved.bars_today:
+        signal_markers = replay_intraday_signals(
+            bars=resolved.bars_today,
+            prev_close=prev_close,
+            target_date=target_date,
+            daily_trend=daily_trend,
+            daily_trend_strength=daily_trend_strength,
+            daily_action=daily_action,
+            has_position=has_position,
+        )
 
     # Step 8: Build response
     bars_for_client = [
@@ -259,9 +292,19 @@ def get_intraday_signal(symbol: str, market: str = "CN", db: Session = Depends(g
         "current_price": round(current_price, 3),
         "intraday": {
             "action": signal.action,
-            "signal_type": signal.signal_type,
+            "signal_type": {
+                "BREAKOUT": "突破",
+                "VWAP_REVERSAL": "VWAP回归",
+                "RSI_EXTREME": "RSI极端",
+                "MICRO_TREND": "分时趋势",
+                "VOLUME_SURGE": "放量",
+            }.get(signal.signal_type, signal.signal_type),
             "confidence": round(signal.confidence, 2),
-            "quality": signal.quality,
+            "quality": {
+                "HIGH_CONFIDENCE": "高置信",
+                "NORMAL": "普通",
+                "LOW_CONFIDENCE": "低置信",
+            }.get(signal.quality, signal.quality),
             "reason": signal.reason,
             "support_level": round(signal.support_level, 4) if signal.support_level else None,
             "resistance_level": round(signal.resistance_level, 4) if signal.resistance_level else None,
@@ -297,4 +340,5 @@ def get_intraday_signal(symbol: str, market: str = "CN", db: Session = Depends(g
             "micro_trend": factors.micro_trend,
         },
         "bars": bars_for_client,
+        "signal_markers": signal_markers,
     }

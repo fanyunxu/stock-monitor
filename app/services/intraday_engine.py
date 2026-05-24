@@ -203,12 +203,13 @@ def resolve_intraday_data(
     raw_bars: list,
     current_price: float,
     prev_close: float,
-    now: datetime = None
+    now: datetime = None,
+    target_date: date = None,
 ) -> IntradayResolvedData:
     """Parse raw API dicts into IntradayResolvedData."""
     if now is None:
         now = datetime.now()
-    today = now.date()
+    today = target_date if target_date is not None else now.date()
 
     bars = []
     for d in raw_bars:
@@ -224,17 +225,19 @@ def resolve_intraday_data(
             timestamp=ts if isinstance(ts, datetime) else ts,
         ))
 
-    # Filter to today
+    # Filter to target date
     bars_today = [b for b in bars if b.timestamp.date() == today]
 
-    # If no today bars, the API might return all bars for the day, not yet labelled by date
-    # Try: if bar timestamps have same date and it's today, use them
+    # If no matching bars, try: all bars might be from the same date, use them
     if not bars_today and bars:
         bar_date = bars[-1].timestamp.date()
         if bar_date == today:
             bars_today = bars[-240:]  # at most one day
 
-    is_market_open = _is_a_market_open(now)
+    if target_date is not None:
+        is_market_open = len(bars_today) > 0  # has data = was a trading day
+    else:
+        is_market_open = _is_a_market_open(now)
 
     closes = [b.close for b in bars_today]
     volumes = [b.volume for b in bars_today]
@@ -554,3 +557,81 @@ class IntradayDecisionEngine:
             result.support_level = max(s for s in support_candidates if s < price) if any(s < price for s in support_candidates) else min(support_candidates)
         if resistance_candidates:
             result.resistance_level = min(r for r in resistance_candidates if r > price) if any(r > price for r in resistance_candidates) else max(resistance_candidates)
+
+
+# =============================================================================
+# Section 7: Historical Replay — walk through each bar to find signal points
+# =============================================================================
+
+def replay_intraday_signals(
+    bars: List[IntradayBar],
+    prev_close: float,
+    target_date: date,
+    daily_trend: str,
+    daily_trend_strength: float,
+    daily_action: str,
+    has_position: bool,
+    min_bars: int = 3,
+) -> List[dict]:
+    """Replay the intraday decision engine bar-by-bar to find all signal points.
+
+    Returns list of marker dicts with bar_index, time, action, signal_type, etc.
+    Deduplicates consecutive same-type signals.
+    """
+    if len(bars) < min_bars:
+        return []
+
+    markers = []
+    last_action = "HOLD"
+
+    for i in range(min_bars, len(bars) + 1):
+        slice_bars = bars[:i]
+        closes = [b.close for b in slice_bars]
+        volumes = [b.volume for b in slice_bars]
+        cp = closes[-1]
+        high_of_day = max(b.high for b in slice_bars)
+        low_of_day = min(b.low for b in slice_bars)
+        today_open = slice_bars[0].open
+
+        resolved = IntradayResolvedData(
+            bars=slice_bars,
+            bars_today=slice_bars,
+            current_price=cp,
+            prev_close=prev_close,
+            today_open=today_open,
+            bar_count=len(slice_bars),
+            is_market_open=True,
+            closes=closes,
+            volumes=volumes,
+            high_of_day=high_of_day,
+            low_of_day=low_of_day,
+        )
+
+        ind = compute_intraday_indicators(resolved, opening_range_bars=6)
+        factors = evaluate_intraday_factors(ind, resolved)
+        signal = IntradayDecisionEngine.decide(
+            daily_trend, daily_trend_strength, daily_action,
+            factors, ind, resolved, has_position,
+        )
+
+        if signal.action != last_action and signal.action in ("T_BUY", "T_SELL"):
+            bar = bars[i - 1]
+            type_cn = {
+                "BREAKOUT": "突破",
+                "VWAP_REVERSAL": "VWAP回归",
+                "RSI_EXTREME": "RSI极端",
+                "MICRO_TREND": "分时趋势",
+                "VOLUME_SURGE": "放量",
+            }.get(signal.signal_type, signal.signal_type)
+            markers.append({
+                "bar_index": i - 1,
+                "time": bar.timestamp.strftime("%H:%M"),
+                "action": signal.action,
+                "signal_type": type_cn,
+                "confidence": round(signal.confidence, 2),
+                "price": round(bar.close, 4 if bar.close < 1 else 3),
+                "reason": signal.reason,
+            })
+            last_action = signal.action
+
+    return markers

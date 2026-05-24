@@ -375,7 +375,7 @@ class StockService:
         return StockService.get_stock_info(symbol, market)["current_price"]
 
     @staticmethod
-    def get_intraday_klines(symbol: str, market: str = "CN", klt: int = 1, limit: int = 240) -> list:
+    def get_intraday_klines(symbol: str, market: str = "CN", klt: int = 1, limit: int = 240, beg: str = None) -> list:
         """Fetch intraday minute-level kline data from EastMoney.
 
         Args:
@@ -383,12 +383,13 @@ class StockService:
             market: market code (CN only for now)
             klt: kline type — 1=1min, 5=5min
             limit: max bars to return
+            beg: optional start date in YYYYMMDD format for historical data
 
         Returns:
             list of {open, high, low, close, volume, timestamp}
         """
         if market != "CN":
-            return StockService._get_intraday_klines_yahoo(symbol, market, klt, limit)
+            return StockService._get_intraday_klines_yahoo(symbol, market, klt, limit, beg)
 
         symbol = symbol.upper().strip()
         if symbol == "000300":
@@ -400,12 +401,20 @@ class StockService:
         else:
             secid_prefix = "1"
 
+        if beg:
+            end_date = beg
+            date_params = f"&beg={beg}&end={end_date}"
+            lmt = max(limit, 60)
+        else:
+            end_date = "20500101"
+            date_params = ""
         em_url = "http://push2his.eastmoney.com/api/qt/stock/kline/get"
         params_str = (
             f"secid={secid_prefix}.{symbol}"
             "&fields1=f1,f2,f3,f4,f5,f6"
             "&fields2=f51,f52,f53,f54,f55,f56"
-            f"&klt={klt}&fqt=1&end=20500101&lmt={limit}"
+            f"&klt={klt}&fqt=1&end={end_date}&lmt={lmt}"
+            f"{date_params}"
         )
 
         for attempt in range(3):
@@ -445,21 +454,46 @@ class StockService:
             except Exception:
                 pass
 
+        # Fallback: try Yahoo Finance for historical CN data
+        if beg:
+            return StockService._get_intraday_klines_yahoo(symbol, "CN", klt, limit, beg)
+
         return []
 
     @staticmethod
-    def _get_intraday_klines_yahoo(symbol: str, market: str, klt: int, limit: int) -> list:
-        """Fallback: fetch intraday data from Yahoo Finance."""
+    def _get_intraday_klines_yahoo(symbol: str, market: str, klt: int, limit: int, beg: str = None) -> list:
+        """Fallback: fetch intraday data from Yahoo Finance.
+
+        Args:
+            beg: optional target date in YYYYMMDD format for historical data
+        """
         full_symbol = StockService._format_symbol(symbol, market)
+        # For CN stocks, Yahoo needs .SS (Shanghai) or .SZ (Shenzhen) suffix
+        if market == "CN":
+            s = symbol.upper().strip()
+            if s.startswith(("000", "001", "002", "003", "300", "301", "302")):
+                full_symbol = f"{s}.SZ"
+            elif s.startswith(("159", "150", "161", "162", "163", "164", "165")):
+                full_symbol = f"{s}.SZ"
+            else:
+                full_symbol = f"{s}.SS"
         interval_map = {1: "1m", 5: "5m", 15: "15m", 30: "30m", 60: "60m"}
         interval = interval_map.get(klt, "5m")
         try:
             ticker = yf.Ticker(full_symbol)
-            # 5d covers the current trading day
-            hist = ticker.history(period="5d", interval=interval)
+
+            if beg:
+                # Historical: use start/end to get a specific date's data
+                target_date = datetime.strptime(beg, "%Y%m%d")
+                end_dt = target_date + timedelta(days=1)
+                hist = ticker.history(start=target_date, end=end_dt, interval=interval)
+                filter_date = target_date.date()
+            else:
+                hist = ticker.history(period="5d", interval=interval)
+                filter_date = datetime.now().date()
+
             if hist.empty:
                 return []
-            today = datetime.now().date()
             bars = []
             for ts, row in hist.iterrows():
                 close = float(row["Close"])
@@ -473,8 +507,8 @@ class StockService:
                     "volume": int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,
                     "timestamp": ts.to_pydatetime().replace(tzinfo=None) if ts.tzinfo else ts.to_pydatetime(),
                 })
-            # Filter to today only
-            bars = [b for b in bars if b["timestamp"].date() == today]
+            # Filter to target date
+            bars = [b for b in bars if b["timestamp"].date() == filter_date]
             return bars[-limit:]
         except Exception:
             return []

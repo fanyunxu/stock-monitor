@@ -54,7 +54,8 @@
         </a>
       </li>
       <li class="nav-item ms-auto" v-if="activeTab === 'intraday'">
-        <span class="nav-link text-muted small">
+        <span class="nav-link text-muted small d-flex align-items-center gap-2">
+          <input v-model="selectedDate" type="date" class="form-control form-control-sm" style="width:140px" @change="fetchIntradaySignal">
           <i class="bi bi-arrow-repeat me-1" :class="{ 'spin-anim': intraLoading }"></i>
           自动刷新 {{ refreshCountdown }}s
           <button class="btn btn-sm btn-outline-secondary ms-2" @click="fetchIntradaySignal">立即刷新</button>
@@ -331,48 +332,24 @@
         <small class="ms-2 text-muted">置信度: {{ (intradayData.intraday.confidence * 100).toFixed(0) }}%</small>
       </div>
 
-      <!-- Time-Sharing / K-line Chart (SVG) -->
-      <div class="card mb-3" v-if="intradayData.bars?.length > 0">
+      <!-- K-line Chart (ECharts) -->
+      <div class="card mb-3" v-if="intradayData">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
           <span><i class="bi bi-candlestick-chart me-2"></i>K线图 (5分钟)
-            <small class="text-muted ms-2">{{ intradayData.bars.length }} 根</small>
+            <small class="text-muted ms-2">{{ intradayData.bar_count || 0 }} 根</small>
           </span>
           <small class="text-muted">
             <span class="text-danger me-2">■ 阴线</span><span class="text-success me-2">■ 阳线</span>
             <span class="text-info me-2">-- VWAP</span><span>▊ 成交量</span>
           </small>
         </div>
-        <div class="card-body p-2">
-          <svg :viewBox="`0 0 ${SVG_W} ${SVG_H}`" style="width:100%; height:320px; font-family: monospace;">
-            <!-- Grid lines -->
-            <line v-for="(y, i) in chartGrid" :key="'g'+i"
-                  x1="60" :y1="y" :x2="SVG_W - 10" :y2="y"
-                  stroke="#e8e8e8" stroke-width="0.3" />
-            <!-- Candlestick bars -->
-            <template v-for="(b, i) in chartCandles" :key="'c'+i">
-              <!-- Wick (high-low line) -->
-              <line :x1="b.cx" :y1="b.highY" :x2="b.cx" :y2="b.lowY"
-                    :stroke="b.color" stroke-width="0.8" />
-              <!-- Body (open-close rect) -->
-              <rect v-if="b.bodyH > 0"
-                    :x="b.bodyX" :y="b.bodyY" :width="b.bodyW" :height="b.bodyH"
-                    :fill="b.color" />
-            </template>
-            <!-- VWAP line -->
-            <line v-if="chartVwapY != null" x1="60" :y1="chartVwapY" :x2="SVG_W - 10" :y2="chartVwapY"
-                  stroke="#0dcaf0" stroke-width="1" stroke-dasharray="5,3" />
-            <!-- Volume bars -->
-            <template v-for="(bar, i) in chartVolumeBars" :key="'v'+i">
-              <rect :x="bar.x" :y="bar.y" :width="chartBarW" :height="bar.h"
-                    :fill="bar.color" opacity="0.3" />
-            </template>
-            <!-- Y-axis labels (left) -->
-            <text v-for="(l, i) in chartYLabels" :key="'yl'+i"
-                  x="56" :y="l.y + 4" text-anchor="end" font-size="10" fill="#666">{{ l.text }}</text>
-            <!-- Legend -->
-            <rect x="SVG_W - 170" y="5" width="160" height="18" rx="3" fill="white" stroke="#ddd" stroke-width="0.5" opacity="0.9" />
-            <text x="SVG_W - 162" y="17" font-size="10" fill="#666">今开 {{ fmtPrice(intradayData.bars[0]?.open) }} | 昨收 {{ fmtPrice(intradayData.prev_close) }}</text>
-          </svg>
+        <div class="card-body p-2" v-if="intradayData.bars?.length > 0">
+          <v-chart :option="chartOption" autoresize style="height: 400px;" />
+        </div>
+        <div class="card-body text-center py-5 text-muted" v-else>
+          <i class="bi bi-bar-chart d-block mb-2" style="font-size:2rem"></i>
+          <span v-if="!intradayData.is_market_open">非交易时段，暂无分时数据</span>
+          <span v-else>暂无K线数据</span>
         </div>
       </div>
 
@@ -550,7 +527,18 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, shallowRef } from 'vue'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { CandlestickChart, BarChart, LineChart } from 'echarts/charts'
+import {
+  GridComponent, TooltipComponent, MarkPointComponent,
+  MarkLineComponent, DataZoomComponent,
+} from 'echarts/components'
+import VChart from 'vue-echarts'
+
+use([CanvasRenderer, CandlestickChart, BarChart, LineChart,
+  GridComponent, TooltipComponent, MarkPointComponent, MarkLineComponent, DataZoomComponent])
 
 const holdings = ref([])
 const selectedSymbol = ref('')
@@ -560,6 +548,7 @@ const data = ref(null)
 const loading = ref(false)
 const error = ref('')
 const activeTab = ref('intraday')
+const selectedDate = ref(new Date().toISOString().split('T')[0])
 
 const intradayData = ref(null)
 const intraLoading = ref(false)
@@ -578,6 +567,7 @@ function onSelectHolding() {
   intradayData.value = null
   error.value = ''
   intraError.value = ''
+  selectedDate.value = new Date().toISOString().split('T')[0]
   if (selectedSymbol.value && selectedSymbol.value !== '__manual__') {
     symbol.value = ''
     const h = holdings.value.find(x => x.symbol === selectedSymbol.value)
@@ -696,135 +686,127 @@ const intraMicroTrendClass = computed(() => {
   return ''
 })
 
-// SVG Chart constants
-const SVG_W = 720
-const SVG_H = 320
-const CHART_LEFT = 60
-const CHART_RIGHT = SVG_W - 10
-const CHART_TOP = 12
-const CHART_BOTTOM = 210
-const VOL_BOTTOM = 310
-const VOL_TOP = 240
-
-function chartY(price, pmin, pmax) {
-  if (pmin === pmax) return (CHART_TOP + CHART_BOTTOM) / 2
-  return CHART_BOTTOM - ((price - pmin) / (pmax - pmin)) * (CHART_BOTTOM - CHART_TOP)
-}
-
-const chartData = computed(() => {
+// ECharts option
+const chartOption = computed(() => {
   const bars = intradayData.value?.bars || []
-  if (bars.length === 0) return null
-  // Use high/low for price range (candlesticks need full range)
-  const highs = bars.map(b => b.high)
-  const lows = bars.map(b => b.low)
-  const vwap = intradayData.value?.intraday?.vwap
-  let pmin = Math.min(...lows)
-  let pmax = Math.max(...highs)
-  if (vwap != null) {
-    pmin = Math.min(pmin, vwap)
-    pmax = Math.max(pmax, vwap)
-  }
-  const padding = (pmax - pmin) * 0.05 || 0.01
-  pmin -= padding
-  pmax += padding
-  return { bars, pmin, pmax, vwap }
-})
+  if (bars.length === 0) return {}
 
-const chartGrid = computed(() => {
-  const cd = chartData.value
-  if (!cd) return []
-  const lines = []
-  const steps = 5
-  for (let i = 0; i <= steps; i++) {
-    const price = cd.pmin + (cd.pmax - cd.pmin) * (i / steps)
-    lines.push(chartY(price, cd.pmin, cd.pmax))
-  }
-  return lines
-})
-
-const chartYLabels = computed(() => {
-  const cd = chartData.value
-  if (!cd) return []
-  const labels = []
-  const steps = 5
-  for (let i = 0; i <= steps; i++) {
-    const price = cd.pmin + (cd.pmax - cd.pmin) * (i / steps)
-    labels.push({
-      y: chartY(price, cd.pmin, cd.pmax),
-      text: price.toFixed(price >= 1 ? 2 : 4)
-    })
-  }
-  return labels
-})
-
-const chartBarW = computed(() => {
-  const cd = chartData.value
-  if (!cd || cd.bars.length <= 1) return 1
-  const gap = (CHART_RIGHT - CHART_LEFT) / Math.max(1, cd.bars.length)
-  return Math.max(0.6, gap * 0.7)
-})
-
-const chartCandles = computed(() => {
-  const cd = chartData.value
-  if (!cd) return []
-  const n = cd.bars.length
-  const gap = (CHART_RIGHT - CHART_LEFT) / Math.max(1, n)
-  const bodyW = Math.max(0.6, gap * 0.6)
-  const halfGap = gap / 2
-
-  return cd.bars.map((b, i) => {
-    const cx = CHART_LEFT + i * gap + halfGap
-    const highY = chartY(b.high, cd.pmin, cd.pmax)
-    const lowY = chartY(b.low, cd.pmin, cd.pmax)
-    const openY = chartY(b.open, cd.pmin, cd.pmax)
-    const closeY = chartY(b.close, cd.pmin, cd.pmax)
-
+  const times = bars.map(b => b.time)
+  const ohlc = bars.map(b => [b.open, b.close, b.low, b.high])
+  const volumes = bars.map((b, i) => {
     const isUp = b.close >= b.open
-    const color = isUp ? '#dc3545' : '#28a745'
+    return { value: b.volume, itemStyle: { color: isUp ? '#ef5350' : '#26a69a' } }
+  })
+  const vwap = intradayData.value?.intraday?.vwap
 
-    const bodyTop = Math.min(openY, closeY)
-    const bodyH = Math.max(1, Math.abs(closeY - openY))
+  // VWAP line data (same value across all bars)
+  const vwapData = vwap != null ? times.map(() => vwap) : []
 
-    return {
-      cx, highY, lowY, color,
-      bodyX: cx - bodyW / 2,
-      bodyY: bodyTop,
-      bodyW: bodyW,
-      bodyH: bodyH,
+  // Signal markers for markPoint
+  const buyMarkers = []
+  const sellMarkers = []
+  const markers = intradayData.value?.signal_markers || []
+  for (const m of markers) {
+    const label = m.action === 'T_BUY' ? '买入' : '卖出'
+    const data = {
+      name: label + ' ' + m.signal_type,
+      coord: [m.bar_index, m.price],
+      value: label,
+      symbol: 'pin',
+      symbolSize: 40,
+      label: { show: true, fontSize: 11, fontWeight: 'bold', formatter: label + '\n' + m.signal_type },
     }
-  })
-})
+    if (m.action === 'T_BUY') {
+      data.itemStyle = { color: '#26a69a' }
+      data.symbol = 'arrow'
+      data.symbolRotate = 0
+      buyMarkers.push(data)
+    } else {
+      data.itemStyle = { color: '#ef5350' }
+      data.symbol = 'arrow'
+      data.symbolRotate = 180
+      sellMarkers.push(data)
+    }
+  }
+  const allMarkers = [...buyMarkers, ...sellMarkers]
 
-const chartVwapY = computed(() => {
-  const cd = chartData.value
-  if (!cd || cd.vwap == null) return null
-  return chartY(cd.vwap, cd.pmin, cd.pmax)
-})
-
-const chartVolumeBars = computed(() => {
-  const cd = chartData.value
-  if (!cd) return []
-  const volumes = cd.bars.map(b => b.volume || 0)
-  const vmax = Math.max(...volumes, 1)
-  const n = cd.bars.length
-  const gap = (CHART_RIGHT - CHART_LEFT) / Math.max(1, n)
-  const barW = Math.max(0.5, gap * 0.7)
-  const halfGap = gap / 2
-
-  return cd.bars.map((b, i) => {
-    const x = CHART_LEFT + i * gap + halfGap - barW / 2
-    const h = Math.max(1, (b.volume / vmax) * (VOL_BOTTOM - VOL_TOP))
-    const y = VOL_BOTTOM - h
-    const color = b.close >= b.open ? '#dc3545' : '#28a745'
-    return { x, y, h, color }
-  })
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      formatter: (params) => {
+        const k = params.find(p => p.seriesName === 'K线')
+        const v = params.find(p => p.seriesName === '成交量')
+        const vw = params.find(p => p.seriesName === 'VWAP')
+        if (!k) return ''
+        const data = k.data
+        let html = `<b>${k.axisValue}</b><br/>`
+        html += `开 ${data[1].toFixed(3)} 高 ${data[3].toFixed(3)}<br/>`
+        html += `收 ${data[2].toFixed(3)} 低 ${data[2].toFixed(3)}<br/>`
+        if (vw && vw.value != null) html += `VWAP ${vw.value.toFixed(3)}<br/>`
+        if (v) html += `量 ${(v.value/10000).toFixed(1)}万`
+        return html
+      },
+    },
+    grid: [
+      { top: 10, left: 60, right: 20, height: '60%' },
+      { top: '75%', left: 60, right: 20, height: '15%' },
+    ],
+    xAxis: [
+      { type: 'category', data: times, gridIndex: 0, axisLabel: { fontSize: 10 }, axisLine: { lineStyle: { color: '#ccc' } } },
+      { type: 'category', data: times, gridIndex: 1, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#ccc' } } },
+    ],
+    yAxis: [
+      { type: 'value', gridIndex: 0, scale: true, splitNumber: 5, axisLabel: { fontSize: 10, formatter: v => v.toFixed(v >= 10 ? 1 : 3) } },
+      { type: 'value', gridIndex: 1, scale: true, axisLabel: { show: false }, splitLine: { show: false } },
+    ],
+    series: [
+      {
+        name: 'K线',
+        type: 'candlestick',
+        xAxisIndex: 0, yAxisIndex: 0,
+        data: ohlc,
+        itemStyle: { color: '#ef5350', color0: '#26a69a', borderColor: '#ef5350', borderColor0: '#26a69a' },
+        markPoint: allMarkers.length > 0 ? {
+          data: allMarkers,
+          label: { show: true, fontSize: 10, fontWeight: 'bold' },
+        } : undefined,
+      },
+      ...(vwap != null ? [{
+        name: 'VWAP',
+        type: 'line',
+        xAxisIndex: 0, yAxisIndex: 0,
+        data: vwapData,
+        lineStyle: { color: '#0dcaf0', width: 1, type: 'dashed' },
+        symbol: 'none',
+      }] : []),
+      {
+        name: '成交量',
+        type: 'bar',
+        xAxisIndex: 1, yAxisIndex: 1,
+        data: volumes,
+      },
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], zoomOnMouseWheel: true, moveOnMouseMove: true },
+    ],
+  }
 })
 
 // Data fetching
 async function loadHoldings() {
   try {
     const r = await fetch('/api/ttrade/holdings')
-    if (r.ok) holdings.value = await r.json()
+    if (r.ok) {
+      holdings.value = await r.json()
+      // 默认选择第一只持仓股票
+      if (holdings.value.length > 0 && !selectedSymbol.value) {
+        selectedSymbol.value = holdings.value[0].symbol
+        const h = holdings.value[0]
+        if (h) market.value = h.market || 'CN'
+        await fetchAll()
+      }
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -855,7 +837,8 @@ async function fetchIntradaySignal() {
   intraLoading.value = true
   intraError.value = ''
   try {
-    const r = await fetch(`/api/ttrade/intraday/${encodeURIComponent(s)}?market=${market.value}`)
+    const dateParam = selectedDate.value ? `&req_date=${selectedDate.value}` : ''
+    const r = await fetch(`/api/ttrade/intraday/${encodeURIComponent(s)}?market=${market.value}${dateParam}`)
     if (!r.ok) {
       const msg = await r.json().catch(() => ({}))
       intraError.value = msg.detail || `请求失败 (${r.status})`
@@ -888,7 +871,9 @@ function switchTab(tab) {
 
 function startIntradayRefresh() {
   stopIntradayRefresh()
-  if (!intradayData.value?.is_market_open) return
+  // Only auto-refresh when viewing today's data
+  const today = new Date().toISOString().split('T')[0]
+  if (selectedDate.value !== today) return
   refreshCountdown.value = 5
 
   countdownTimer = setInterval(() => {
