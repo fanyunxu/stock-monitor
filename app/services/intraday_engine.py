@@ -408,10 +408,10 @@ class IntradayDecisionEngine:
         result.price_vs_vwap_pct = ind.price_vs_vwap_pct
         result.intraday_trend = factors.micro_trend
 
-        # Guard: insufficient data (need at least 15 bars = 15 min with 1-min kline)
-        if resolved.bar_count < 15:
+        # Guard: insufficient data (need at least 3 bars = 15 min with 5-min kline)
+        if resolved.bar_count < 3:
             result.action = "HOLD"
-            result.reason = f"日内数据不足 ({resolved.bar_count} 分钟)"
+            result.reason = f"日内数据不足 ({resolved.bar_count * 5} 分钟)"
             result.quality = "LOW_CONFIDENCE"
             return result
 
@@ -432,7 +432,7 @@ class IntradayDecisionEngine:
         daily_sell_all = "SELL_ALL" in str(daily_action).upper()
 
         # ---- Signal 1: Opening range breakout (highest confidence) ----
-        within_opening_hour = resolved.bar_count <= 60  # first 60 min with 1-min bars
+        within_opening_hour = resolved.bar_count <= 12  # first 60 min with 5-min bars
 
         if within_opening_hour and factors.range_signal == "BREAKOUT_UP" and factors.volume_signal in ("SURGE", "ELEVATED"):
             if not daily_sell_all:
@@ -571,7 +571,7 @@ def replay_intraday_signals(
     daily_trend_strength: float,
     daily_action: str,
     has_position: bool,
-    min_bars: int = 15,
+    min_bars: int = 3,
 ) -> List[dict]:
     """Replay the intraday decision engine bar-by-bar to find all signal points.
 
@@ -607,7 +607,7 @@ def replay_intraday_signals(
             low_of_day=low_of_day,
         )
 
-        ind = compute_intraday_indicators(resolved, opening_range_bars=30)
+        ind = compute_intraday_indicators(resolved, opening_range_bars=6)
         factors = evaluate_intraday_factors(ind, resolved)
         signal = IntradayDecisionEngine.decide(
             daily_trend, daily_trend_strength, daily_action,
