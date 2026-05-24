@@ -17,15 +17,17 @@ import Alerts from './views/Alerts.vue'
 import Server from './views/Server.vue'
 import Logs from './views/Logs.vue'
 import Simple from './views/Simple.vue'
+import TTrade from './views/TTrade.vue'
 
 const TABS = {
   alerts: { component: Alerts, props: {} },
   server: { component: Server, props: {} },
   logs: { component: Logs, props: {} },
   simple: { component: Simple, props: {} },
+  ttrade: { component: TTrade, props: {} },
 }
 
-const activeTab = ref(sessionStorage.getItem('initialTab') || 'alerts')
+const activeTab = ref(sessionStorage.getItem('initialTab') || 'ttrade')
 const navState = reactive({ visible: true })
 
 // Clear the stored tab after reading
