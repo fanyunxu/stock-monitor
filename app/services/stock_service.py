@@ -2,12 +2,14 @@ import yfinance as yf
 import requests
 import math
 import subprocess
+import json
+import random
 from datetime import datetime, timedelta
 from typing import Optional
 
 
 class StockService:
-    """Stock data service - supports CN (Tencent API), US/HK (Yahoo Finance)."""
+    """Stock data service - supports CN (Tencent/Sina/EastMoney rotation), US/HK (Yahoo Finance)."""
 
     @staticmethod
     def get_stock_info(symbol: str, market: str = "US") -> dict:
@@ -18,57 +20,139 @@ class StockService:
 
     @staticmethod
     def _get_cn_stock_info(symbol: str) -> dict:
-        """Fetch CN (A-share) stock info via Tencent Finance API."""
+        """Fetch CN (A-share) stock info, rotating between Tencent/Sina/EastMoney to spread load."""
         symbol = symbol.upper().strip()
-        
-        # Determine exchange prefix
-        # 000-003, 300-302: Shenzhen main board / ChiNext
-        # 15xxxx-16xxxx: Shenzhen ETF (funds)
-        # 002: SME board
-        # 001: Shanghai
+
         if symbol == "000300":
             prefix = "sh"
+            secid_prefix = "1"
         elif symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
             prefix = "sz"
+            secid_prefix = "0"
         elif symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
-            prefix = "sz"  # Shenzhen ETF funds
+            prefix = "sz"
+            secid_prefix = "0"
         else:
-            prefix = "sh"  # Shanghai
-        
+            prefix = "sh"
+            secid_prefix = "1"
+
+        # Rotate between 3 free sources to avoid rate limiting at 1s refresh
+        sources = [
+            lambda: StockService._cn_quote_tencent(prefix, symbol),
+            lambda: StockService._cn_quote_sina(prefix, symbol),
+            lambda: StockService._cn_quote_eastmoney(secid_prefix, symbol),
+        ]
+        random.shuffle(sources)
+
+        for fn in sources:
+            try:
+                return fn()
+            except Exception:
+                continue
+
+        raise ValueError(f"Could not fetch CN stock info for {symbol}: all sources failed")
+
+    @staticmethod
+    def _cn_quote_tencent(prefix: str, symbol: str) -> dict:
+        """Real-time CN stock quote from Tencent Finance."""
         full_code = f"{prefix}{symbol}"
-        
-        try:
-            # Use curl subprocess (Tencent returns GBK encoded data)
-            result = subprocess.run(
-                ["curl", "-s", "--max-time", "10",
-                 "-H", "User-Agent: Mozilla/5.0",
-                 f"http://qt.gtimg.cn/q={full_code}"],
-                capture_output=True, timeout=15
-            )
-            content = result.stdout.decode("gbk", errors="replace")
-            if "~" not in content:
-                raise ValueError(f"Invalid response for {symbol}")
-            
-            parts = content.split("~")
-            name = parts[1]
-            current_price = float(parts[3])
-            yesterday_close = float(parts[4])
-            
-            price_change = current_price - yesterday_close
-            price_change_percent = (price_change / yesterday_close * 100) if yesterday_close else 0.0
-            
-            return {
-                "symbol": symbol,
-                "name": name,
-                "current_price": current_price,
-                "previous_price": yesterday_close,
-                "price_change": price_change,
-                "price_change_percent": price_change_percent,
-                "market": "CN",
-                "timestamp": datetime.now()
-            }
-        except Exception as e:
-            raise ValueError(f"Could not fetch CN stock info for {symbol}: {str(e)}")
+        result = subprocess.run(
+            ["curl", "-s", "--max-time", "5",
+             "-H", "User-Agent: Mozilla/5.0",
+             f"http://qt.gtimg.cn/q={full_code}"],
+            capture_output=True, timeout=10
+        )
+        content = result.stdout.decode("gbk", errors="replace")
+        if "~" not in content:
+            raise ValueError(f"Invalid Tencent response for {symbol}")
+
+        parts = content.split("~")
+        name = parts[1]
+        current_price = float(parts[3])
+        yesterday_close = float(parts[4])
+
+        return {
+            "symbol": symbol,
+            "name": name,
+            "current_price": current_price,
+            "previous_price": yesterday_close,
+            "price_change": current_price - yesterday_close,
+            "price_change_percent": (current_price - yesterday_close) / yesterday_close * 100 if yesterday_close else 0.0,
+            "market": "CN",
+            "timestamp": datetime.now()
+        }
+
+    @staticmethod
+    def _cn_quote_sina(prefix: str, symbol: str) -> dict:
+        """Real-time CN stock quote from Sina Finance."""
+        full_code = f"{prefix}{symbol}"
+        result = subprocess.run(
+            ["curl", "-s", "--max-time", "5",
+             "-H", "User-Agent: Mozilla/5.0",
+             "-H", "Referer: https://finance.sina.com.cn",
+             f"http://hq.sinajs.cn/list={full_code}"],
+            capture_output=True, timeout=10
+        )
+        content = result.stdout.decode("gbk", errors="replace")
+        # Format: var hq_str_sh600036="name,open,prev_close,price,high,low,...";
+        if '="' not in content or content.strip().endswith('=""'):
+            raise ValueError(f"Invalid Sina response for {symbol}")
+
+        data = content.split('="')[1].rstrip('";\n')
+        fields = data.split(",")
+        if len(fields) < 4:
+            raise ValueError(f"Short Sina response for {symbol}")
+
+        name = fields[0]
+        current_price = float(fields[3])
+        yesterday_close = float(fields[2])
+
+        return {
+            "symbol": symbol,
+            "name": name,
+            "current_price": current_price,
+            "previous_price": yesterday_close,
+            "price_change": current_price - yesterday_close,
+            "price_change_percent": (current_price - yesterday_close) / yesterday_close * 100 if yesterday_close else 0.0,
+            "market": "CN",
+            "timestamp": datetime.now()
+        }
+
+    @staticmethod
+    def _cn_quote_eastmoney(secid_prefix: str, symbol: str) -> dict:
+        """Real-time CN stock quote from EastMoney API."""
+        url = (
+            f"http://push2.eastmoney.com/api/qt/stock/get?"
+            f"secid={secid_prefix}.{symbol}"
+            f"&fields=f43,f57,f58,f170"
+        )
+        result = subprocess.run(
+            ["curl", "-s", "--max-time", "5",
+             "-H", "User-Agent: Mozilla/5.0",
+             url],
+            capture_output=True, timeout=10
+        )
+        data = json.loads(result.stdout)
+        d = data.get("data") or {}
+        if d is None or d.get("f43") is None:
+            raise ValueError(f"Invalid EastMoney response for {symbol}")
+
+        # f43 is price * 1000 (e.g. 1968 → 1.968)
+        current_price = d["f43"] / 1000
+        # f170 is change percent * 100 (e.g. -150 → -1.50%)
+        change_pct = (d.get("f170") or 0) / 100
+        yesterday_close = current_price / (1 + change_pct / 100) if change_pct != -100 else None
+
+        return {
+            "symbol": symbol,
+            "name": d.get("f58") or d.get("f57", symbol),
+            "current_price": current_price,
+            "previous_price": yesterday_close,
+            "price_change": current_price - yesterday_close if yesterday_close else None,
+            "price_change_percent": change_pct if yesterday_close else 0.0,
+            "market": "CN",
+            "timestamp": datetime.now()
+        }
 
     @staticmethod
     def _get_yahoo_stock_info(symbol: str, market: str = "US") -> dict:

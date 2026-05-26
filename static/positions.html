@@ -32,25 +32,33 @@
   </div>
   <div class="meta" id="meta">
     <span>⏱ <span id="lastRefresh">—</span></span>
-    <span>🔄 <span id="countdown">5</span>s</span>
+    <span>📊 <span id="idxCountdown">5</span>s</span>
+    <span>📦 <span id="posCountdown">1</span>s</span>
   </div>
   <pre id="content">加载中...</pre>
 </div>
 
 <script>
 const API = '/api'
-const REFRESH_INTERVAL = 5
+const INDICES_INTERVAL = 5
+const POSITIONS_INTERVAL = 1
 
-let countdownSec = REFRESH_INTERVAL
+let idxCountdown = INDICES_INTERVAL
+let posCountdown = POSITIONS_INTERVAL
 let countdownTimer = null
-let dataTimer = null
+let indicesTimer = null
+let positionsTimer = null
 
 function fmtTime(date) {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function setCountdown(v) {
-  document.getElementById('countdown').textContent = v
+function setIdxCountdown(v) {
+  document.getElementById('idxCountdown').textContent = v
+}
+
+function setPosCountdown(v) {
+  document.getElementById('posCountdown').textContent = v
 }
 
 async function loadIndices() {
@@ -108,12 +116,8 @@ async function loadPositions() {
 
     const lines = []
     if (holdings.length === 0) {
-      lines.push('📦 暂无持仓')
+      lines.push('')
     } else {
-      const totalProfit = holdings.reduce((sum, s) => sum + (s.profit_loss || 0), 0)
-      const totalStr = totalProfit >= 0 ? `+${Math.round(totalProfit)}` : `${Math.round(totalProfit)}`
-      lines.push(`📦 持仓 (${holdings.length})  盈亏 ${totalStr}元`)
-      lines.push('─'.repeat(45))
       holdings.forEach(s => {
         const price = s.current_price != null ? s.current_price.toFixed(3) : '—'
         const change = s.daily_return != null
@@ -143,8 +147,8 @@ async function loadPositions() {
       : new Date()
     document.getElementById('lastRefresh').textContent = fmtTime(calcAt)
 
-    countdownSec = REFRESH_INTERVAL
-    setCountdown(countdownSec)
+    posCountdown = POSITIONS_INTERVAL
+    setPosCountdown(posCountdown)
   } catch (e) {
     document.getElementById('content').textContent = '加载失败: ' + e.message
   }
@@ -152,9 +156,13 @@ async function loadPositions() {
 
 function startCountdown() {
   countdownTimer = setInterval(() => {
-    countdownSec--
-    if (countdownSec < 0) countdownSec = REFRESH_INTERVAL
-    setCountdown(countdownSec)
+    idxCountdown--
+    if (idxCountdown < 0) idxCountdown = INDICES_INTERVAL
+    setIdxCountdown(idxCountdown)
+
+    posCountdown--
+    if (posCountdown < 0) posCountdown = POSITIONS_INTERVAL
+    setPosCountdown(posCountdown)
   }, 1000)
 }
 
@@ -163,15 +171,14 @@ document.addEventListener('dblclick', () => {
   hidden = !hidden
   document.getElementById('content').style.display = hidden ? 'none' : 'block'
   document.getElementById('meta').style.display = hidden ? 'none' : 'flex'
+  document.getElementById('indices').style.display = hidden ? 'none' : 'flex'
 })
 
 loadIndices()
 loadPositions()
 startCountdown()
-dataTimer = setInterval(() => {
-  loadIndices()
-  loadPositions()
-}, REFRESH_INTERVAL * 1000)
+indicesTimer = setInterval(loadIndices, INDICES_INTERVAL * 1000)
+positionsTimer = setInterval(loadPositions, POSITIONS_INTERVAL * 1000)
 </script>
 </body>
 </html>
