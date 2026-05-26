@@ -936,11 +936,6 @@ class RuleEngine:
         else:
             conditions.append(("COOLDOWN", False, f"冷却期剩余 {position.cooldown_remaining} 天"))
 
-        # Non-trading day check
-        if not resolved.is_trading_day:
-            conditions.append(("TRADING_DAY", False, "非交易日，不生成买入信号"))
-            return {"can_buy": False, "reason": "非交易日，不生成买入信号", "conditions": conditions, "factors": factors_list, "score": 0, "quality": "LOW_CONFIDENCE", "confidence": 0}
-
         met_count = sum(1 for _, ok, _ in conditions if ok)
         total = len(conditions)
         all_met = met_count == total
@@ -994,9 +989,6 @@ class RuleEngine:
         can_add_position = position.position_ratio < profile.get("max_position_ratio", 0.8)
         if not can_add_position:
             return {"can_add": False, "reason": "仓位已达上限"}
-
-        if not resolved.is_trading_day:
-            return {"can_add": False, "reason": "非交易日"}
 
         # Different ADD thresholds by instrument type
         if instrument_type == "STOCK":

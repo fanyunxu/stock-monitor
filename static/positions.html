@@ -16,10 +16,20 @@
     .down { color: #98c379; }
     .title { color: #61afef; font-weight: bold; }
     .divider { color: #555; }
+    .indices { display: flex; gap: 24px; padding: 10px 0; border-bottom: 1px solid #333; font-size: 13px; flex-wrap: wrap; }
+    .idx-item { display: flex; flex-direction: column; }
+    .idx-name { color: #888; font-size: 0.75rem; }
+    .idx-price { font-weight: 600; font-size: 1.05rem; }
+    .idx-change { font-size: 0.8rem; color: #888; }
   </style>
 </head>
 <body>
 <div class="container">
+  <div class="indices" id="indices">
+    <div class="idx-item"><span class="idx-name">上证指数</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">科创50</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">韩国KOSPI</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+  </div>
   <div class="meta" id="meta">
     <span>⏱ <span id="lastRefresh">—</span></span>
     <span>🔄 <span id="countdown">5</span>s</span>
@@ -41,6 +51,51 @@ function fmtTime(date) {
 
 function setCountdown(v) {
   document.getElementById('countdown').textContent = v
+}
+
+async function loadIndices() {
+  try {
+    const [shR, kcR, krR] = await Promise.all([
+      fetch(`${API}/market/index`).then(r => r.json()),
+      fetch(`${API}/kechuang_index`).then(r => r.json()),
+      fetch(`${API}/korea_index`).then(r => r.json()),
+    ])
+
+    const container = document.getElementById('indices')
+    const items = container.querySelectorAll('.idx-item')
+
+    function fmtIdx(item, data, name) {
+      if (data.error) {
+        item.querySelector('.idx-name').textContent = '?'
+        item.querySelector('.idx-price').textContent = '—'
+        item.querySelector('.idx-change').textContent = ''
+        return
+      }
+
+      if (data.current_price != null) {
+        const price = data.current_price.toFixed(0)
+        const sign = data.price_change >= 0 ? '+' : ''
+        const chg = `${sign}${data.price_change.toFixed(0)}  ${sign}${data.price_change_percent.toFixed(2)}%`
+        item.querySelector('.idx-name').textContent = data.name || name
+        item.querySelector('.idx-price').textContent = price
+        item.querySelector('.idx-change').textContent = chg
+      }
+      else if (data.price != null) {
+        const price = data.price.toFixed(0)
+        const sign = data.change >= 0 ? '+' : ''
+        const chg = `${sign}${data.change.toFixed(2)}%`
+        item.querySelector('.idx-name').textContent = data.name || name
+        item.querySelector('.idx-price').textContent = price
+        item.querySelector('.idx-change').textContent = chg
+      }
+    }
+
+    fmtIdx(items[0], shR, '上证指数')
+    fmtIdx(items[1], kcR, '科创50')
+    fmtIdx(items[2], krR, '韩国KOSPI')
+  } catch (e) {
+    // silently fail, indices are non-critical
+  }
 }
 
 async function loadPositions() {
@@ -69,7 +124,7 @@ async function loadPositions() {
         if (profitVal !== null) {
           if (profitVal > 0) profitStr = `+${profitVal}`
           else if (profitVal < 0) profitStr = `${profitVal}`
-          else profitStr = '0'  // 盈亏刚好为0时不显示+/-前缀
+          else profitStr = '0'
         }
         const cost = s.cost != null ? s.cost.toFixed(3) : '—'
 
@@ -77,13 +132,12 @@ async function loadPositions() {
         const profitClass = s.profit_loss >= 0 ? 'up' : 'down'
 
         lines.push(`${s.name || s.symbol}（${s.symbol}）`)
-        lines.push(`  ${price} ${changeClass == 'up' ? '▲' : '▼'} ${change}  成本 ${cost}  盈 ${profitStr}元`)
+        lines.push(`  ${price} ${changeClass == 'up' ? '▲' : '▼'} ${change}`)
       })
     }
 
     document.getElementById('content').textContent = lines.join('\n')
 
-    // 用服务端数据时间
     const calcAt = signals.length > 0 && signals[0].calculated_at
       ? new Date(signals[0].calculated_at)
       : new Date()
@@ -104,7 +158,6 @@ function startCountdown() {
   }, 1000)
 }
 
-// 双击隐藏内容，显示假日志
 let hidden = false
 document.addEventListener('dblclick', () => {
   hidden = !hidden
@@ -112,9 +165,13 @@ document.addEventListener('dblclick', () => {
   document.getElementById('meta').style.display = hidden ? 'none' : 'flex'
 })
 
+loadIndices()
 loadPositions()
 startCountdown()
-dataTimer = setInterval(loadPositions, REFRESH_INTERVAL * 1000)
+dataTimer = setInterval(() => {
+  loadIndices()
+  loadPositions()
+}, REFRESH_INTERVAL * 1000)
 </script>
 </body>
 </html>

@@ -1,4 +1,6 @@
 """做T监测：个股实时买卖点信号"""
+import threading
+import time
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -9,6 +11,11 @@ from app.services.etf_signal_service import EtfSignalService
 from app.services.stock_service import StockService
 
 router = APIRouter(prefix="/api/ttrade", tags=["ttrade"])
+
+# Intraday signal cache (per symbol, short TTL to avoid hammering EastMoney)
+_intraday_cache = {}
+_intraday_cache_ttl = 3  # seconds (shorter than frontend 5s refresh to avoid stale data)
+_intraday_cache_lock = threading.Lock()
 
 
 @router.get("/holdings")
@@ -165,6 +172,14 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
         except ValueError:
             raise HTTPException(status_code=400, detail="date格式须为 YYYY-MM-DD")
 
+    # Short cache for today's data to avoid hammering EastMoney every 5s
+    if target_date is None:
+        cache_key = f"{symbol.upper()}:{market}"
+        with _intraday_cache_lock:
+            entry = _intraday_cache.get(cache_key)
+            if entry and (time.time() - entry["ts"]) < _intraday_cache_ttl:
+                return entry["data"]
+
     # Look up holdings
     watch = db.query(EtfWatch).filter(EtfWatch.symbol == symbol.upper()).first()
     cost = float(watch.cost) if watch and watch.cost else None
@@ -213,7 +228,7 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
     # Step 3: Fetch intraday 5-min klines
     beg_param = target_date.strftime("%Y%m%d") if target_date else None
     try:
-        raw_bars = StockService.get_intraday_klines(symbol, market, klt=5, limit=60, beg=beg_param)
+        raw_bars = StockService.get_intraday_klines(symbol, market, klt=5, limit=100, beg=beg_param)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取分钟K线失败: {e}")
 
@@ -275,7 +290,7 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
     if watch and watch.name:
         name = watch.name
 
-    return {
+    result = {
         "symbol": symbol.upper(),
         "name": name,
         "market": market,
@@ -342,3 +357,10 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
         "bars": bars_for_client,
         "signal_markers": signal_markers,
     }
+
+    # Cache today's data briefly to avoid hammering EastMoney
+    if target_date is None:
+        with _intraday_cache_lock:
+            _intraday_cache[cache_key] = {"data": result, "ts": time.time()}
+
+    return result

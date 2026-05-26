@@ -844,7 +844,14 @@ async function fetchIntradaySignal() {
       intraError.value = msg.detail || `请求失败 (${r.status})`
       return
     }
-    intradayData.value = await r.json()
+    const newData = await r.json()
+    // Preserve previous bars if API returned empty bars (intermittent EastMoney failure)
+    if ((!newData.bars || newData.bars.length === 0) && intradayData.value?.bars?.length > 0) {
+      newData.bars = intradayData.value.bars
+      newData.bar_count = intradayData.value.bar_count
+      newData.is_market_open = intradayData.value.is_market_open
+    }
+    intradayData.value = newData
     // Restart countdown
     refreshCountdown.value = 5
   } catch (e) {

@@ -39,6 +39,7 @@ const switchTab = inject('switchTab')
 
 const navItems = [
   { tab: 'alerts',    label: '股票', icon: 'bi bi-bar-chart-fill' },
+  { tab: 'ttrade',    label: '做T', icon: 'bi bi-arrow-left-right' },
   { tab: 'server',    label: '服务器监控', icon: 'bi bi-server' },
   { tab: 'logs',      label: '运行日志', icon: 'bi bi-journal-text' },
   { tab: 'simple',    label: '极简模式', icon: 'bi bi-text-left' },

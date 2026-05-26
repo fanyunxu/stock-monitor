@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models import Base, engine, SessionLocal, get_db
 from app.models.models import AlertRule, Stock, AppSetting
-from app.api import alerts, system, etf, stocks
+from app.api import alerts, system, etf, stocks, ttrade
 from app.services.alert_service import AlertService
 
 # Create database tables
@@ -153,6 +153,7 @@ from app.api import ai
 app.include_router(etf.router)
 app.include_router(stocks.router)
 app.include_router(ai.router)
+app.include_router(ttrade.router)
 
 
 @app.get("/api/korea_index")
@@ -204,6 +205,11 @@ def positions_mode():
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/positions.html")
 
+@app.get("/t")
+def ttrade_mode():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/?tab=ttrade")
+
 
 @app.get("/api/market/index")
 def get_market_index():
@@ -219,6 +225,28 @@ def get_market_index():
         price_change_percent = (price_change / yesterday_close * 100) if yesterday_close else 0.0
         return {
             "name": parts[1] or "上证指数",
+            "current_price": current_price,
+            "price_change": price_change,
+            "price_change_percent": price_change_percent,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/kechuang_index")
+def get_kechuang_index():
+    """Get 科创50 real-time data."""
+    import requests
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get("http://qt.gtimg.cn/q=sh000688", headers=headers, timeout=10)
+        parts = r.text.split("~")
+        current_price = float(parts[3])
+        yesterday_close = float(parts[4])
+        price_change = current_price - yesterday_close
+        price_change_percent = (price_change / yesterday_close * 100) if yesterday_close else 0.0
+        return {
+            "name": parts[1] or "科创50",
             "current_price": current_price,
             "price_change": price_change,
             "price_change_percent": price_change_percent,

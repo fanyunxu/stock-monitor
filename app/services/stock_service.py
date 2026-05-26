@@ -408,6 +408,7 @@ class StockService:
         else:
             end_date = "20500101"
             date_params = ""
+            lmt = max(limit, 60)
         em_url = "http://push2his.eastmoney.com/api/qt/stock/kline/get"
         params_str = (
             f"secid={secid_prefix}.{symbol}"
