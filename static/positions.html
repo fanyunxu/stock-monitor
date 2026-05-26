@@ -32,8 +32,6 @@
   </div>
   <div class="meta" id="meta">
     <span>⏱ <span id="lastRefresh">—</span></span>
-    <span>📊 <span id="idxCountdown">5</span>s</span>
-    <span>📦 <span id="posCountdown">1</span>s</span>
   </div>
   <pre id="content">加载中...</pre>
 </div>
@@ -43,22 +41,11 @@ const API = '/api'
 const INDICES_INTERVAL = 5
 const POSITIONS_INTERVAL = 1
 
-let idxCountdown = INDICES_INTERVAL
-let posCountdown = POSITIONS_INTERVAL
-let countdownTimer = null
 let indicesTimer = null
 let positionsTimer = null
 
 function fmtTime(date) {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
-function setIdxCountdown(v) {
-  document.getElementById('idxCountdown').textContent = v
-}
-
-function setPosCountdown(v) {
-  document.getElementById('posCountdown').textContent = v
 }
 
 async function loadIndices() {
@@ -146,24 +133,9 @@ async function loadPositions() {
       ? new Date(signals[0].calculated_at)
       : new Date()
     document.getElementById('lastRefresh').textContent = fmtTime(calcAt)
-
-    posCountdown = POSITIONS_INTERVAL
-    setPosCountdown(posCountdown)
   } catch (e) {
     document.getElementById('content').textContent = '加载失败: ' + e.message
   }
-}
-
-function startCountdown() {
-  countdownTimer = setInterval(() => {
-    idxCountdown--
-    if (idxCountdown < 0) idxCountdown = INDICES_INTERVAL
-    setIdxCountdown(idxCountdown)
-
-    posCountdown--
-    if (posCountdown < 0) posCountdown = POSITIONS_INTERVAL
-    setPosCountdown(posCountdown)
-  }, 1000)
 }
 
 let hidden = false
@@ -176,7 +148,6 @@ document.addEventListener('dblclick', () => {
 
 loadIndices()
 loadPositions()
-startCountdown()
 indicesTimer = setInterval(loadIndices, INDICES_INTERVAL * 1000)
 positionsTimer = setInterval(loadPositions, POSITIONS_INTERVAL * 1000)
 </script>
