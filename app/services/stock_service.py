@@ -46,7 +46,9 @@ class StockService:
 
         for fn in sources:
             try:
-                return fn()
+                result = fn()
+                if result.get("current_price") and result["current_price"] > 0:
+                    return result
             except Exception:
                 continue
 
@@ -70,6 +72,8 @@ class StockService:
         name = parts[1]
         current_price = float(parts[3])
         yesterday_close = float(parts[4])
+        if current_price <= 0:
+            raise ValueError(f"Tencent returned zero/negative price for {symbol}")
 
         return {
             "symbol": symbol,
@@ -106,6 +110,8 @@ class StockService:
         name = fields[0]
         current_price = float(fields[3])
         yesterday_close = float(fields[2])
+        if current_price <= 0:
+            raise ValueError(f"Sina returned zero/negative price for {symbol}")
 
         return {
             "symbol": symbol,
@@ -139,6 +145,8 @@ class StockService:
 
         # f43 is price * 1000 (e.g. 1968 → 1.968)
         current_price = d["f43"] / 1000
+        if current_price <= 0:
+            raise ValueError(f"EastMoney returned zero/negative price for {symbol}")
         # f170 is change percent * 100 (e.g. -150 → -1.50%)
         change_pct = (d.get("f170") or 0) / 100
         yesterday_close = current_price / (1 + change_pct / 100) if change_pct != -100 else None
@@ -177,6 +185,8 @@ class StockService:
                 else:
                     cp = pp if pp is not None else info.get("navPrice")
 
+            if cp is not None and cp <= 0:
+                cp = None
             price_change = None
             price_change_pct = None
             if cp is not None and pp is not None and pp != 0:
