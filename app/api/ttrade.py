@@ -2,13 +2,14 @@
 import threading
 import time
 from datetime import datetime, date
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.models import get_db
 from app.models.models import EtfWatch
 from app.services.etf_signal_service import EtfSignalService
 from app.services.stock_service import StockService
+from app.services.intraday_backtest import run_backtest
 
 router = APIRouter(prefix="/api/ttrade", tags=["ttrade"])
 
@@ -16,6 +17,21 @@ router = APIRouter(prefix="/api/ttrade", tags=["ttrade"])
 _intraday_cache = {}
 _intraday_cache_ttl = 3  # seconds (shorter than frontend 5s refresh to avoid stale data)
 _intraday_cache_lock = threading.Lock()
+
+# Order book cache (Level-2 十档盘口): 3s TTL — enough for 1s frontend refresh w/ dedup
+_orderbook_cache = {}
+_orderbook_cache_ttl = 3
+_orderbook_cache_lock = threading.Lock()
+
+# Real-time extended indicators (turnover / volume ratio / amount): 1s TTL
+_realtime_cache = {}
+_realtime_cache_ttl = 1
+_realtime_cache_lock = threading.Lock()
+
+# Backtest cache (1 hour — heavy compute, results stable for the day)
+_backtest_cache = {}
+_backtest_cache_ttl = 3600
+_backtest_cache_lock = threading.Lock()
 
 
 @router.get("/holdings")
@@ -149,7 +165,13 @@ def get_ttrade_signal(symbol: str, market: str = "CN", db: Session = Depends(get
 
 
 @router.get("/intraday/{symbol}")
-def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str] = None, db: Session = Depends(get_db)):
+def get_intraday_signal(
+    symbol: str,
+    market: str = "CN",
+    req_date: Optional[str] = None,
+    klt: int = 5,
+    db: Session = Depends(get_db),
+):
     """
     获取日内做T信号（基于分钟级分时数据）。
     返回日线趋势 + 日内信号 + 指标 + 分钟K线数据。
@@ -157,7 +179,11 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
     Query params:
         req_date: optional date in YYYY-MM-DD format for historical review.
                   When provided, returns signal_markers for chart annotation.
+        klt: kline granularity — 1=1min, 5=5min. Default 5.
     """
+    if klt not in (1, 5):
+        klt = 5
+    opening_range_bars = 6 if klt == 5 else 30  # ~30 min for both modes
     from app.services.intraday_engine import (
         resolve_intraday_data, compute_intraday_indicators,
         evaluate_intraday_factors, IntradayDecisionEngine,
@@ -174,7 +200,7 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
 
     # Short cache for today's data to avoid hammering EastMoney every 5s
     if target_date is None:
-        cache_key = f"{symbol.upper()}:{market}"
+        cache_key = f"{symbol.upper()}:{market}:k{klt}:d{target_date or 'today'}"
         with _intraday_cache_lock:
             entry = _intraday_cache.get(cache_key)
             if entry and (time.time() - entry["ts"]) < _intraday_cache_ttl:
@@ -225,10 +251,10 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
     except Exception:
         pass
 
-    # Step 3: Fetch intraday 5-min klines
+    # Step 3: Fetch intraday klines (1m or 5m)
     beg_param = target_date.strftime("%Y%m%d") if target_date else None
     try:
-        raw_bars = StockService.get_intraday_klines(symbol, market, klt=5, limit=100, beg=beg_param)
+        raw_bars = StockService.get_intraday_klines(symbol, market, klt=klt, limit=240, beg=beg_param)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取分钟K线失败: {e}")
 
@@ -248,7 +274,7 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
     resolved = resolve_intraday_data(raw_bars, current_price, prev_close, target_date=target_date)
 
     # Step 5: Compute indicators (opening range = first 6 bars for 30 min in 5-min kline)
-    ind = compute_intraday_indicators(resolved, opening_range_bars=6)
+    ind = compute_intraday_indicators(resolved, opening_range_bars=opening_range_bars)
 
     # Step 6: Evaluate factors
     factors = evaluate_intraday_factors(ind, resolved)
@@ -363,4 +389,90 @@ def get_intraday_signal(symbol: str, market: str = "CN", req_date: Optional[str]
         with _intraday_cache_lock:
             _intraday_cache[cache_key] = {"data": result, "ts": time.time()}
 
+    return result
+
+
+@router.get("/orderbook/{symbol}")
+def get_orderbook(symbol: str, market: str = "CN"):
+    """Return 10-level order book + real-time extended indicators.
+
+    Cached 3s — frontend may poll every 1s but the upstream is hit at most every 3s.
+    """
+    cache_key = f"{symbol.upper()}:{market.upper()}"
+    now = time.time()
+    with _orderbook_cache_lock:
+        entry = _orderbook_cache.get(cache_key)
+        if entry and (now - entry["ts"]) < _orderbook_cache_ttl:
+            return entry["data"]
+
+    try:
+        data = StockService.get_order_book(symbol, market)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取盘口失败: {e}")
+
+    with _orderbook_cache_lock:
+        _orderbook_cache[cache_key] = {"data": data, "ts": now}
+    return data
+
+
+@router.get("/realtime/{symbol}")
+def get_realtime(symbol: str, market: str = "CN"):
+    """Return lightweight real-time indicators (turnover / volume ratio / amount).
+
+    Cached 1s — meant for high-frequency polling (1s frontend refresh).
+    """
+    cache_key = f"{symbol.upper()}:{market.upper()}"
+    now = time.time()
+    with _realtime_cache_lock:
+        entry = _realtime_cache.get(cache_key)
+        if entry and (now - entry["ts"]) < _realtime_cache_ttl:
+            return entry["data"]
+
+    try:
+        data = StockService.get_realtime_extended(symbol, market)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取实时行情失败: {e}")
+
+    with _realtime_cache_lock:
+        _realtime_cache[cache_key] = {"data": data, "ts": now}
+    return data
+
+
+@router.post("/backtest")
+def post_backtest(body: dict = Body(...)):
+    """Run a T-trade signal backtest over historical minute klines.
+
+    Request body:
+        { symbol: str, market?: "CN", days?: int, klt?: 1|5, holding_period?: int }
+
+    Returns summary stats + capped samples list. Cached 1h.
+    """
+    symbol = (body.get("symbol") or "").upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol required")
+    market = (body.get("market") or "CN").upper()
+    days = int(body.get("days") or 20)
+    klt = int(body.get("klt") or 5)
+    holding_period = int(body.get("holding_period") or 10)
+
+    cache_key = f"{symbol}:{market}:d{days}:k{klt}:h{holding_period}"
+    now = time.time()
+    with _backtest_cache_lock:
+        entry = _backtest_cache.get(cache_key)
+        if entry and (now - entry["ts"]) < _backtest_cache_ttl:
+            return entry["data"]
+
+    try:
+        result = run_backtest(
+            symbol=symbol,
+            market=market,
+            days=days,
+            klt=klt,
+            holding_period=holding_period,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"回测失败: {e}")
+
+    with _backtest_cache_lock:
+        _backtest_cache[cache_key] = {"data": result, "ts": now}
     return result

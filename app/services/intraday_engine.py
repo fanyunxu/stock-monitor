@@ -360,16 +360,16 @@ def evaluate_intraday_factors(
 
     # Volume
     if ind.volume_ratio is not None:
-        if ind.volume_ratio > 2.0:
+        if ind.volume_ratio > 2.5:
             factors.volume_signal = "SURGE"
         elif ind.volume_ratio > 1.3:
             factors.volume_signal = "ELEVATED"
         elif ind.volume_ratio < 0.5:
             factors.volume_signal = "DROP"
 
-    # RSI extremes
+    # RSI extremes — tightened from <30 to <25 (backtest showed <30 was too noisy)
     if ind.intra_rsi_14 is not None:
-        if ind.intra_rsi_14 < 30:
+        if ind.intra_rsi_14 < 25:
             factors.rsi_signal = "OVERSOLD"
         elif ind.intra_rsi_14 > 75:
             factors.rsi_signal = "OVERBOUGHT"
@@ -386,9 +386,13 @@ class IntradayDecisionEngine:
 
     Daily trend provides DIRECTIONAL BIAS:
       - Daily UP: prefer T_BUY on dips, allow T_SELL on overbought spikes
-      - Daily DOWN: prefer T_SELL on rallies, suppress T_BUY
+      - Daily DOWN: prefer T_SELL on rallies, suppress T_BUY (avoid catching falling knives)
       - Daily NEUTRAL: symmetric but higher thresholds
       - Daily SELL_ALL active: suppress all buys entirely
+
+    Tuning (2026-06): backtest on 000001 over 10 days showed BUY signals fired
+    79 times in DOWN trends with 24% winrate. Added trend filter, tightened
+    thresholds (RSI<25, VWAP>0.8%, vol_ratio>2.5), and a 0.60 confidence floor.
     """
 
     @staticmethod
@@ -431,7 +435,13 @@ class IntradayDecisionEngine:
         daily_down = daily_trend == "DOWN"
         daily_sell_all = "SELL_ALL" in str(daily_action).upper()
 
+        # Trend filter: avoid counter-trend signals (the #1 source of losses in backtest).
+        # BREAKOUT is exempt because its 0.80+ confidence justifies a counter-trend entry.
+        allow_buy = not daily_sell_all and not daily_down
+        allow_sell = has_position and not daily_up
+
         # ---- Signal 1: Opening range breakout (highest confidence) ----
+        # BREAKOUT can fire against the daily trend — its 0.80+ confidence justifies it.
         within_opening_hour = resolved.bar_count <= 12  # first 60 min with 5-min bars
 
         if within_opening_hour and factors.range_signal == "BREAKOUT_UP" and factors.volume_signal in ("SURGE", "ELEVATED"):
@@ -439,56 +449,57 @@ class IntradayDecisionEngine:
                 signals.append(("BREAKOUT", "T_BUY", 0.82,
                     f"开盘放量突破 {ind.opening_range_high:.3f}"))
         elif within_opening_hour and factors.range_signal == "BREAKOUT_DOWN" and factors.volume_signal in ("SURGE", "ELEVATED"):
-            signals.append(("BREAKOUT", "T_SELL", 0.80,
-                f"开盘放量跌破 {ind.opening_range_low:.3f}"))
+            if has_position:
+                signals.append(("BREAKOUT", "T_SELL", 0.80,
+                    f"开盘放量跌破 {ind.opening_range_low:.3f}"))
 
-        # ---- Signal 2: VWAP reversion with daily trend context ----
+        # ---- Signal 2: VWAP reversion (tightened thresholds, trend-aligned only) ----
         if factors.vwap_signal in ("BELOW_VWAP", "ABOVE_VWAP") and ind.price_vs_vwap_pct is not None:
             pct_off = abs(ind.price_vs_vwap_pct)
             is_below = factors.vwap_signal == "BELOW_VWAP"
 
-            if daily_up and is_below and pct_off > 0.5:
+            if daily_up and is_below and pct_off > 0.8 and allow_buy:
                 signals.append(("VWAP_REVERSAL", "T_BUY", min(0.75, 0.55 + pct_off * 0.15),
                     f"日内跌至VWAP下方 {pct_off:.1f}%, 日线上升趋势, 逢低买入"))
-            elif daily_up and not is_below and pct_off > 1.0 and has_position:
+            elif daily_up and not is_below and pct_off > 1.5 and has_position:
                 signals.append(("VWAP_REVERSAL", "T_SELL", 0.60,
                     f"日内涨至VWAP上方 {pct_off:.1f}%, 日线上升趋势, 高位减仓"))
-
-            elif daily_down and not is_below and pct_off > 0.5:
+            elif daily_down and not is_below and pct_off > 0.8 and has_position:
                 signals.append(("VWAP_REVERSAL", "T_SELL", min(0.75, 0.55 + pct_off * 0.15),
                     f"日内涨至VWAP上方 {pct_off:.1f}%, 日线下降趋势, 逢高卖出"))
+            elif not daily_up and not daily_down and pct_off > 1.5 and has_position:
+                # NEUTRAL: require position for SELL (avoid noise)
+                if is_below and not daily_sell_all:
+                    signals.append(("VWAP_REVERSAL", "T_BUY", min(0.65, 0.50 + pct_off * 0.1),
+                        f"大幅偏离VWAP {pct_off:.1f}%, 均值回归"))
+                elif not is_below:
+                    signals.append(("VWAP_REVERSAL", "T_SELL", min(0.65, 0.50 + pct_off * 0.1),
+                        f"大幅偏离VWAP {pct_off:.1f}%, 均值回归"))
 
-            elif not daily_up and not daily_down and pct_off > 1.2:
-                action = "T_BUY" if is_below else "T_SELL"
-                signals.append(("VWAP_REVERSAL", action, min(0.65, 0.50 + pct_off * 0.1),
-                    f"大幅偏离VWAP {pct_off:.1f}%, 均值回归"))
+        # ---- Signal 3: RSI extremes (tightened, no downtrend oversold bounce) ----
+        if factors.rsi_signal == "OVERSOLD" and not daily_sell_all and not daily_down:
+            signals.append(("RSI_EXTREME", "T_BUY", 0.65,
+                f"分钟RSI {ind.intra_rsi_14:.1f} 超卖, 短线反弹"))
+        elif factors.rsi_signal == "OVERBOUGHT" and not daily_up and has_position:
+            signals.append(("RSI_EXTREME", "T_SELL", 0.60,
+                f"分钟RSI {ind.intra_rsi_14:.1f} 超买, 短线回调"))
 
-        # ---- Signal 3: RSI extremes ----
-        if factors.rsi_signal == "OVERSOLD" and not daily_sell_all:
-            if daily_down:
-                # In downtrend, oversold can still bounce but weak confidence
-                signals.append(("RSI_EXTREME", "T_BUY", 0.50,
-                    f"分钟RSI {ind.intra_rsi_14:.1f} 超卖, 短线反弹(逆趋势,低置信度)"))
-            else:
-                signals.append(("RSI_EXTREME", "T_BUY", 0.65,
-                    f"分钟RSI {ind.intra_rsi_14:.1f} 超卖, 短线反弹"))
-        elif factors.rsi_signal == "OVERBOUGHT":
-            if not daily_up and has_position:
-                signals.append(("RSI_EXTREME", "T_SELL", 0.60,
-                    f"分钟RSI {ind.intra_rsi_14:.1f} 超买, 短线回调"))
-
-        # ---- Signal 4: Micro-trend + momentum ----
-        if factors.micro_trend == "UP" and factors.momentum_signal == "BULLISH" and not daily_sell_all:
+        # ---- Signal 4: Micro-trend + momentum (trend-aligned only) ----
+        if factors.micro_trend == "UP" and factors.momentum_signal == "BULLISH" and not daily_sell_all and not daily_down:
             signals.append(("MICRO_TREND", "T_BUY", 0.55, "分时多头排列"))
-        elif factors.micro_trend == "DOWN" and factors.momentum_signal == "BEARISH" and has_position:
+        elif factors.micro_trend == "DOWN" and factors.momentum_signal == "BEARISH" and has_position and not daily_up:
             signals.append(("MICRO_TREND", "T_SELL", 0.55, "分时空头排列"))
 
-        # ---- Signal 5: Volume surge with direction ----
+        # ---- Signal 5: Volume surge with direction (trend-aligned only) ----
         if factors.volume_signal == "SURGE":
-            if factors.micro_trend == "UP" and not daily_sell_all:
+            if factors.micro_trend == "UP" and not daily_sell_all and not daily_down:
                 signals.append(("VOLUME_SURGE", "T_BUY", 0.60, "放量拉升"))
-            elif factors.micro_trend == "DOWN" and has_position:
+            elif factors.micro_trend == "DOWN" and has_position and not daily_up:
                 signals.append(("VOLUME_SURGE", "T_SELL", 0.60, "放量下跌"))
+
+        # ---- Confidence floor: drop weak signals to reduce noise ----
+        # MICRO_TREND (0.55) and weak NEUTRAL VWAP (<0.6) will be filtered out.
+        signals = [s for s in signals if s[2] >= 0.60]
 
         # ---- Combine ----
         if not signals:

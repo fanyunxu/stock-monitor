@@ -53,8 +53,17 @@
           </span>
         </a>
       </li>
+      <li class="nav-item">
+        <a class="nav-link" :class="{ active: activeTab === 'backtest' }" href="#" @click.prevent="switchTab('backtest')">
+          <i class="bi bi-clock-history me-1"></i>回测
+        </a>
+      </li>
       <li class="nav-item ms-auto" v-if="activeTab === 'intraday'">
         <span class="nav-link text-muted small d-flex align-items-center gap-2">
+          <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn" :class="intraKlt === 1 ? 'btn-primary' : 'btn-outline-primary'" @click="setIntraKlt(1)">1m</button>
+            <button type="button" class="btn" :class="intraKlt === 5 ? 'btn-primary' : 'btn-outline-primary'" @click="setIntraKlt(5)">5m</button>
+          </div>
           <input v-model="selectedDate" type="date" class="form-control form-control-sm" style="width:140px" @change="fetchIntradaySignal">
           <i class="bi bi-arrow-repeat me-1" :class="{ 'spin-anim': intraLoading }"></i>
           自动刷新 {{ refreshCountdown }}s
@@ -335,7 +344,7 @@
       <!-- K-line Chart (ECharts) -->
       <div class="card mb-3" v-if="intradayData">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-candlestick-chart me-2"></i>K线图 (5分钟)
+          <span><i class="bi bi-candlestick-chart me-2"></i>K线图 ({{ intraKlt }}分钟)
             <small class="text-muted ms-2">{{ intradayData.bar_count || 0 }} 根</small>
           </span>
           <small class="text-muted">
@@ -352,6 +361,9 @@
           <span v-else>暂无K线数据</span>
         </div>
       </div>
+
+      <!-- Order Book Panel (Level-2 十档盘口) -->
+      <OrderBookPanel :orderbook="orderbookData" v-if="currentSymbol" />
 
       <!-- Intraday Indicators Row -->
       <div class="row mb-3">
@@ -517,6 +529,170 @@
       </div>
     </div>
 
+    <!-- ==================== BACKTEST PANEL ==================== -->
+    <div v-if="activeTab === 'backtest' && !loading">
+      <div class="card mb-3">
+        <div class="card-header py-2">
+          <i class="bi bi-clock-history me-2"></i>历史信号回测
+          <small class="text-muted ms-2">用历史 1m/5m K 线重放信号引擎,统计胜率与平均收益</small>
+        </div>
+        <div class="card-body py-2">
+          <div class="row g-2 align-items-end">
+            <div class="col-auto">
+              <label class="form-label small mb-1">回测天数</label>
+              <select v-model.number="backtestDays" class="form-select form-select-sm" style="width:90px">
+                <option v-for="n in [5, 10, 20, 30, 60]" :key="n" :value="n">{{ n }}天</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <label class="form-label small mb-1">K线颗粒度</label>
+              <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn" :class="intraKlt === 1 ? 'btn-primary' : 'btn-outline-primary'" @click="intraKlt = 1">1m</button>
+                <button type="button" class="btn" :class="intraKlt === 5 ? 'btn-primary' : 'btn-outline-primary'" @click="intraKlt = 5">5m</button>
+              </div>
+            </div>
+            <div class="col-auto">
+              <label class="form-label small mb-1">持有期 (bars)</label>
+              <select v-model.number="backtestHolding" class="form-select form-select-sm" style="width:90px">
+                <option v-for="n in [5, 10, 20, 30, 48]" :key="n" :value="n">{{ n }}根</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <button class="btn btn-primary btn-sm" @click="fetchBacktest" :disabled="backtestLoading || !currentSymbol">
+                <i class="bi bi-play-fill me-1" v-if="!backtestLoading"></i>
+                <span class="spinner-border spinner-border-sm me-1" v-if="backtestLoading"></span>
+                开始回测
+              </button>
+            </div>
+            <div class="col text-muted small" v-if="backtestResult">
+              共分析 {{ backtestResult.days_analyzed }}/{{ backtestResult.days_requested }} 个交易日
+            </div>
+          </div>
+          <div v-if="backtestError" class="alert alert-warning mt-2 mb-0">
+            <i class="bi bi-exclamation-triangle me-2"></i>{{ backtestError }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Backtest summary cards -->
+      <div v-if="backtestResult" class="row mb-3 g-2">
+        <div class="col-6 col-md-3">
+          <div class="card text-center h-100">
+            <div class="card-body py-2">
+              <small class="text-muted">T_BUY 胜率</small>
+              <h3 class="mb-0 fw-bold" :class="(backtestResult.summary.buy_stats.winrate || 0) >= 50 ? 'text-danger' : 'text-success'">
+                {{ backtestResult.summary.buy_stats.winrate != null ? backtestResult.summary.buy_stats.winrate.toFixed(1) + '%' : '-' }}
+              </h3>
+              <small class="text-muted">样本 {{ backtestResult.summary.buy_stats.count }}</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="card text-center h-100">
+            <div class="card-body py-2">
+              <small class="text-muted">T_SELL 胜率</small>
+              <h3 class="mb-0 fw-bold" :class="(backtestResult.summary.sell_stats.winrate || 0) >= 50 ? 'text-danger' : 'text-success'">
+                {{ backtestResult.summary.sell_stats.winrate != null ? backtestResult.summary.sell_stats.winrate.toFixed(1) + '%' : '-' }}
+              </h3>
+              <small class="text-muted">样本 {{ backtestResult.summary.sell_stats.count }}</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="card text-center h-100">
+            <div class="card-body py-2">
+              <small class="text-muted">T_BUY 平均收益</small>
+              <h4 class="mb-0 fw-bold" :class="(backtestResult.summary.buy_stats.avg_return || 0) >= 0 ? 'text-danger' : 'text-success'">
+                {{ backtestResult.summary.buy_stats.avg_return != null ? (backtestResult.summary.buy_stats.avg_return >= 0 ? '+' : '') + backtestResult.summary.buy_stats.avg_return.toFixed(2) + '%' : '-' }}
+              </h4>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="card text-center h-100">
+            <div class="card-body py-2">
+              <small class="text-muted">T_SELL 平均收益</small>
+              <h4 class="mb-0 fw-bold" :class="(backtestResult.summary.sell_stats.avg_return || 0) >= 0 ? 'text-danger' : 'text-success'">
+                {{ backtestResult.summary.sell_stats.avg_return != null ? (backtestResult.summary.sell_stats.avg_return >= 0 ? '+' : '') + backtestResult.summary.sell_stats.avg_return.toFixed(2) + '%' : '-' }}
+              </h4>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backtest by signal type -->
+      <div v-if="backtestResult && Object.keys(backtestResult.summary.by_signal_type || {}).length" class="card mb-3">
+        <div class="card-header py-2"><i class="bi bi-pie-chart me-2"></i>按信号类型分组</div>
+        <div class="card-body py-2">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>类型</th><th class="text-end">样本</th><th class="text-end">胜率</th><th class="text-end">平均收益</th></tr></thead>
+            <tbody>
+              <tr v-for="(v, k) in backtestResult.summary.by_signal_type" :key="k">
+                <td>{{ k }}</td>
+                <td class="text-end">{{ v.count }}</td>
+                <td class="text-end" :class="(v.winrate || 0) >= 50 ? 'text-danger' : 'text-success'">{{ v.winrate.toFixed(1) }}%</td>
+                <td class="text-end" :class="v.avg_return >= 0 ? 'text-danger' : 'text-success'">
+                  {{ v.avg_return >= 0 ? '+' : '' }}{{ v.avg_return.toFixed(2) }}%
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Backtest samples table -->
+      <div v-if="backtestResult && backtestResult.samples.length" class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-list-ul me-2"></i>信号明细 (最多展示 200 条)</span>
+          <small class="text-muted">{{ backtestResult.samples.length }} / {{ backtestResult.summary.total_signals }}</small>
+        </div>
+        <div class="card-body p-0" style="max-height:480px;overflow-y:auto">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="sticky-top bg-light">
+              <tr>
+                <th>日期</th>
+                <th>时间</th>
+                <th>类型</th>
+                <th>动作</th>
+                <th class="text-end">置信度</th>
+                <th class="text-end">入场价</th>
+                <th class="text-end">N根后价格</th>
+                <th class="text-end">最大涨幅</th>
+                <th class="text-end">最大回撤</th>
+                <th class="text-end">收益%</th>
+                <th>结果</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(s, idx) in backtestResult.samples" :key="idx">
+                <td><small>{{ s.date }}</small></td>
+                <td><small>{{ s.time }}</small></td>
+                <td><small class="text-muted">{{ s.signal_type }}</small></td>
+                <td>
+                  <span class="badge" :class="s.action === 'T_BUY' ? 'bg-danger' : 'bg-success'">
+                    {{ s.action === 'T_BUY' ? '买' : '卖' }}
+                  </span>
+                </td>
+                <td class="text-end"><small>{{ (s.confidence * 100).toFixed(0) }}%</small></td>
+                <td class="text-end font-mono"><small>{{ s.entry_price }}</small></td>
+                <td class="text-end font-mono"><small>{{ s.exit_price_N }}</small></td>
+                <td class="text-end font-mono"><small class="text-danger">+{{ s.max_gain }}</small></td>
+                <td class="text-end font-mono"><small class="text-success">{{ s.max_drawdown }}</small></td>
+                <td class="text-end font-mono">
+                  <small :class="s.return_pct >= 0 ? 'text-danger' : 'text-success'">
+                    {{ s.return_pct >= 0 ? '+' : '' }}{{ s.return_pct.toFixed(2) }}%
+                  </small>
+                </td>
+                <td>
+                  <span class="badge" :class="resultBadgeClass(s.result)">{{ resultLabel(s.result) }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Empty state -->
     <div v-if="!data && !intradayData && !loading && !error" class="text-center py-5 text-muted">
       <i class="bi bi-search display-3 d-block mb-3"></i>
@@ -536,6 +712,7 @@ import {
   MarkLineComponent, DataZoomComponent,
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import OrderBookPanel from '../components/OrderBookPanel.vue'
 
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart,
   GridComponent, TooltipComponent, MarkPointComponent, MarkLineComponent, DataZoomComponent])
@@ -552,6 +729,17 @@ const selectedDate = ref(new Date().toISOString().split('T')[0])
 
 const intradayData = ref(null)
 const intraLoading = ref(false)
+const intraKlt = ref(5)  // 1 or 5 minute kline granularity
+
+const orderbookData = ref(null)
+const orderbookLoading = ref(false)
+
+const backtestResult = ref(null)
+const backtestLoading = ref(false)
+const backtestError = ref('')
+const backtestDays = ref(20)
+const backtestHolding = ref(10)
+
 const intraError = ref('')
 const refreshCountdown = ref(5)
 let refreshTimer = null
@@ -838,7 +1026,7 @@ async function fetchIntradaySignal() {
   intraError.value = ''
   try {
     const dateParam = selectedDate.value ? `&req_date=${selectedDate.value}` : ''
-    const r = await fetch(`/api/ttrade/intraday/${encodeURIComponent(s)}?market=${market.value}${dateParam}`)
+    const r = await fetch(`/api/ttrade/intraday/${encodeURIComponent(s)}?market=${market.value}&klt=${intraKlt.value}${dateParam}`)
     if (!r.ok) {
       const msg = await r.json().catch(() => ({}))
       intraError.value = msg.detail || `请求失败 (${r.status})`
@@ -861,8 +1049,29 @@ async function fetchIntradaySignal() {
   }
 }
 
+async function fetchOrderbook() {
+  const s = currentSymbol.value
+  if (!s) return
+  orderbookLoading.value = true
+  try {
+    const r = await fetch(`/api/ttrade/orderbook/${encodeURIComponent(s)}?market=${market.value}`)
+    if (!r.ok) return  // silent fail — non-critical
+    orderbookData.value = await r.json()
+  } catch (e) {
+    // silent
+  } finally {
+    orderbookLoading.value = false
+  }
+}
+
+function setIntraKlt(v) {
+  if (intraKlt.value === v) return
+  intraKlt.value = v
+  fetchIntradaySignal()
+}
+
 async function fetchAll() {
-  await Promise.all([fetchSignal(), fetchIntradaySignal()])
+  await Promise.all([fetchSignal(), fetchIntradaySignal(), fetchOrderbook()])
   startIntradayRefresh()
 }
 
@@ -870,6 +1079,7 @@ function switchTab(tab) {
   activeTab.value = tab
   if (tab === 'intraday') {
     if (!intradayData.value) fetchIntradaySignal()
+    fetchOrderbook()
     startIntradayRefresh()
   } else {
     stopIntradayRefresh()
@@ -888,12 +1098,53 @@ function startIntradayRefresh() {
     if (refreshCountdown.value <= 0) {
       refreshCountdown.value = 5
       fetchIntradaySignal()
+      fetchOrderbook()
     }
   }, 1000)
 }
 
 function stopIntradayRefresh() {
   if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
+}
+
+async function fetchBacktest() {
+  const s = currentSymbol.value
+  if (!s) {
+    backtestError.value = '请先选择股票'
+    return
+  }
+  backtestLoading.value = true
+  backtestError.value = ''
+  try {
+    const r = await fetch('/api/ttrade/backtest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol: s,
+        market: market.value,
+        days: backtestDays.value,
+        klt: intraKlt.value,
+        holding_period: backtestHolding.value,
+      }),
+    })
+    if (!r.ok) {
+      const msg = await r.json().catch(() => ({}))
+      backtestError.value = msg.detail || `请求失败 (${r.status})`
+      return
+    }
+    backtestResult.value = await r.json()
+  } catch (e) {
+    backtestError.value = '网络错误: ' + e.message
+  } finally {
+    backtestLoading.value = false
+  }
+}
+
+function resultLabel(r) {
+  return { win: '赢', loss: '亏', breakeven: '平' }[r] || r
+}
+function resultBadgeClass(r) {
+  return { win: 'bg-danger', loss: 'bg-success', breakeven: 'bg-secondary' }[r] || 'bg-secondary'
 }
 
 onMounted(() => {
@@ -915,5 +1166,8 @@ onUnmounted(() => {
 }
 .nav-tabs .nav-link {
   cursor: pointer;
+}
+.font-mono {
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Mono', 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
 </style>

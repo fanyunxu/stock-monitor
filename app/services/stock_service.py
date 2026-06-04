@@ -163,6 +163,325 @@ class StockService:
         }
 
     @staticmethod
+    def _get_cn_secid_prefix(symbol: str) -> str:
+        """Determine EastMoney secid prefix (0=Shenzhen, 1=Shanghai) for a CN symbol."""
+        if symbol == "000300":
+            return "1"
+        if symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+            return "0"
+        if symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
+            return "0"
+        return "1"
+
+    @staticmethod
+    def _cn_quote_tencent_orderbook(prefix: str, symbol: str) -> dict:
+        """5-level order book from Tencent API (fallback for when EastMoney Level-2 unavailable)."""
+        result = subprocess.run(
+            ["curl", "-s", "--max-time", "5",
+             "-H", "User-Agent: Mozilla/5.0",
+             f"http://qt.gtimg.cn/q={prefix}{symbol}"],
+            capture_output=True, timeout=10
+        )
+        content = result.stdout.decode("gbk", errors="replace")
+        if "~" not in content:
+            raise ValueError(f"Invalid Tencent orderbook response for {symbol}")
+        parts = content.split("~")
+        if len(parts) < 30:
+            raise ValueError(f"Short Tencent orderbook response for {symbol}")
+
+        # Field positions (0-indexed): [9-18] = 买一到买五, [19-28] = 卖一到卖五
+        # Pattern: 9=买一价, 10=买一量, 11=买二价, 12=买二量, ...
+        bids = []
+        bid_total = 0
+        for i in range(5):
+            try:
+                p = float(parts[9 + i * 2])
+                v = int(parts[10 + i * 2])
+                bids.append({"price": round(p, 4), "volume": v})
+                bid_total += v
+            except (ValueError, IndexError):
+                bids.append({"price": None, "volume": 0})
+
+        asks = []
+        ask_total = 0
+        for i in range(5):
+            try:
+                p = float(parts[19 + i * 2])
+                v = int(parts[20 + i * 2])
+                asks.append({"price": round(p, 4), "volume": v})
+                ask_total += v
+            except (ValueError, IndexError):
+                asks.append({"price": None, "volume": 0})
+
+        total = bid_total + ask_total
+        return {
+            "asks": asks,
+            "bids": bids,
+            "ask_total": ask_total,
+            "bid_total": bid_total,
+            "committee_ratio": round((bid_total - ask_total) / total * 100, 2) if total > 0 else 0.0,
+            "committee_diff": bid_total - ask_total,
+        }
+
+    @staticmethod
+    def _cn_quote_eastmoney_orderbook(secid_prefix: str, symbol: str) -> dict:
+        """10-level order book (Level-2) from EastMoney. Fields f11-f50 are used for the book."""
+        # Note: f43/f47/f48 in this range are NOT current_price/volume/amount
+        # (those are accessed via the snapshot fields, requested separately).
+        # Here f43 = 买三价, f47 = 买七价, f48 = 买八价, f50 = 买十量.
+        fields = ",".join([f"f{n}" for n in range(11, 51)])
+        url = (
+            f"http://push2.eastmoney.com/api/qt/stock/get?"
+            f"secid={secid_prefix}.{symbol}&fields={fields}"
+        )
+        result = subprocess.run(
+            ["curl", "-s", "--max-time", "5",
+             "-H", "User-Agent: Mozilla/5.0",
+             url],
+            capture_output=True, timeout=10
+        )
+        data = json.loads(result.stdout)
+        d = data.get("data") or {}
+        if not d:
+            raise ValueError(f"Empty EastMoney orderbook data for {symbol}")
+
+        # 卖盘: f11-f20 价, f21-f30 量
+        asks = []
+        ask_total = 0
+        for i in range(10):
+            price = d.get(f"f{11 + i}")
+            volume = d.get(f"f{21 + i}")
+            if price is not None and price > 0:
+                p = price / 1000  # 价格也是 * 1000
+                v = int(volume or 0)
+                asks.append({"price": round(p, 4), "volume": v})
+                ask_total += v
+            else:
+                asks.append({"price": None, "volume": 0})
+
+        # 买盘: f31-f40 价, f41-f50 量
+        bids = []
+        bid_total = 0
+        for i in range(10):
+            price = d.get(f"f{31 + i}")
+            volume = d.get(f"f{41 + i}")
+            if price is not None and price > 0:
+                p = price / 1000
+                v = int(volume or 0)
+                bids.append({"price": round(p, 4), "volume": v})
+                bid_total += v
+            else:
+                bids.append({"price": None, "volume": 0})
+
+        total = bid_total + ask_total
+        return {
+            "asks": asks,
+            "bids": bids,
+            "ask_total": ask_total,
+            "bid_total": bid_total,
+            "committee_ratio": round((bid_total - ask_total) / total * 100, 2) if total > 0 else 0.0,
+            "committee_diff": bid_total - ask_total,
+        }
+
+    @staticmethod
+    def _cn_quote_eastmoney_indicators(secid_prefix: str, symbol: str) -> dict:
+        """Snapshot indicators: current price, volume, amount, turnover, volume ratio, etc."""
+        fields = "f43,f60,f47,f48,f168,f10,f49,f161,f170,f57,f58"
+        url = (
+            f"http://push2.eastmoney.com/api/qt/stock/get?"
+            f"secid={secid_prefix}.{symbol}&fields={fields}"
+        )
+        result = subprocess.run(
+            ["curl", "-s", "--max-time", "3",
+             "-H", "User-Agent: Mozilla/5.0",
+             url],
+            capture_output=True, timeout=5
+        )
+        data = json.loads(result.stdout)
+        d = data.get("data") or {}
+        if not d or d.get("f43") is None:
+            raise ValueError(f"Empty EastMoney indicator data for {symbol}")
+
+        current_price = d["f43"] / 1000
+        change_pct = (d.get("f170") or 0) / 100
+        prev_close = (d.get("f60") or 0) / 1000 if d.get("f60") else None
+        return {
+            "name": d.get("f58") or d.get("f57") or symbol,
+            "current_price": round(current_price, 4),
+            "prev_close": round(prev_close, 4) if prev_close else None,
+            "price_change_percent": round(change_pct, 2),
+            "volume": int(d.get("f47") or 0),  # 手
+            "amount": d.get("f48") or 0,  # 元
+            "turnover_rate": round((d.get("f168") or 0) / 100, 2),  # 已经是 * 100
+            "volume_ratio": round((d.get("f10") or 0) / 100, 2),
+            "inner_volume": int(d.get("f49") or 0),  # 内盘
+            "outer_volume": int(d.get("f161") or 0),  # 外盘
+        }
+
+    @staticmethod
+    def get_order_book(symbol: str, market: str = "CN") -> dict:
+        """Fetch 10-level order book (Level-2) and real-time indicators.
+
+        Returns a dict combining EastMoney Level-2 order book + snapshot indicators.
+        Falls back to Tencent 5-level if EastMoney Level-2 unavailable.
+        """
+        ts = datetime.now().isoformat()
+        if market != "CN":
+            return StockService._get_order_book_yahoo(symbol, market, ts)
+
+        symbol = symbol.upper().strip()
+        secid_prefix = StockService._get_cn_secid_prefix(symbol)
+
+        # 1) Try EastMoney for snapshot indicators
+        indicators = None
+        for _ in range(2):
+            try:
+                indicators = StockService._cn_quote_eastmoney_indicators(secid_prefix, symbol)
+                break
+            except Exception:
+                continue
+
+        # 2) Try EastMoney for 10-level order book
+        book_source = "eastmoney_level2"
+        book = None
+        for _ in range(2):
+            try:
+                book = StockService._cn_quote_eastmoney_orderbook(secid_prefix, symbol)
+                break
+            except Exception:
+                continue
+
+        # 3) Fallback to Tencent 5-level if EastMoney book failed
+        if book is None:
+            if symbol == "000300":
+                prefix = "sh"
+            elif symbol.startswith(("000", "001", "002", "003", "300", "301", "302")):
+                prefix = "sz"
+            elif symbol.startswith(("159", "150", "161", "162", "163", "164", "165")):
+                prefix = "sz"
+            else:
+                prefix = "sh"
+            try:
+                book = StockService._cn_quote_tencent_orderbook(prefix, symbol)
+                book_source = "tencent_5level"
+            except Exception:
+                book = {
+                    "asks": [{"price": None, "volume": 0}] * 10,
+                    "bids": [{"price": None, "volume": 0}] * 10,
+                    "ask_total": 0, "bid_total": 0,
+                    "committee_ratio": 0.0, "committee_diff": 0,
+                }
+                book_source = "empty"
+
+        # 4) Pad to 10 levels if source was 5-level
+        if book_source == "tencent_5level":
+            book["asks"] = list(book["asks"]) + [{"price": None, "volume": 0}] * 5
+            book["bids"] = list(book["bids"]) + [{"price": None, "volume": 0}] * 5
+
+        # 5) Combine with indicators
+        result = {
+            "symbol": symbol,
+            "market": "CN",
+            "source": book_source,
+            "asks": book["asks"],
+            "bids": book["bids"],
+            "ask_total": book["ask_total"],
+            "bid_total": book["bid_total"],
+            "committee_ratio": book["committee_ratio"],
+            "committee_diff": book["committee_diff"],
+            "timestamp": ts,
+        }
+        if indicators:
+            result.update({
+                "name": indicators["name"],
+                "current_price": indicators["current_price"],
+                "prev_close": indicators["prev_close"],
+                "price_change_percent": indicators["price_change_percent"],
+                "volume": indicators["volume"],
+                "amount": indicators["amount"],
+                "turnover_rate": indicators["turnover_rate"],
+                "volume_ratio": indicators["volume_ratio"],
+                "inner_volume": indicators["inner_volume"],
+                "outer_volume": indicators["outer_volume"],
+            })
+        else:
+            result.update({
+                "name": symbol,
+                "current_price": None,
+                "prev_close": None,
+                "price_change_percent": None,
+                "volume": 0,
+                "amount": 0.0,
+                "turnover_rate": None,
+                "volume_ratio": None,
+                "inner_volume": 0,
+                "outer_volume": 0,
+            })
+        return result
+
+    @staticmethod
+    def _get_order_book_yahoo(symbol: str, market: str, ts: str) -> dict:
+        """Order book fallback for non-CN markets (limited data)."""
+        empty_book = {
+            "asks": [{"price": None, "volume": 0}] * 10,
+            "bids": [{"price": None, "volume": 0}] * 10,
+            "ask_total": 0, "bid_total": 0,
+            "committee_ratio": 0.0, "committee_diff": 0,
+        }
+        try:
+            info = StockService.get_stock_info(symbol, market)
+        except Exception:
+            info = {}
+        return {
+            "symbol": symbol,
+            "market": market,
+            "source": "yahoo_basic",
+            **empty_book,
+            "name": info.get("name") or symbol,
+            "current_price": info.get("current_price"),
+            "prev_close": info.get("previous_price"),
+            "price_change_percent": info.get("price_change_percent"),
+            "volume": 0, "amount": 0.0,
+            "turnover_rate": None, "volume_ratio": None,
+            "inner_volume": 0, "outer_volume": 0,
+            "timestamp": ts,
+        }
+
+    @staticmethod
+    def get_realtime_extended(symbol: str, market: str = "CN") -> dict:
+        """Lightweight real-time indicator fetch for 1s frontend refresh.
+
+        Returns current_price, volume, amount, turnover, etc. but NOT the 10-level book
+        (call get_order_book() when book is needed). Faster than get_order_book().
+        """
+        ts = datetime.now().isoformat()
+        if market != "CN":
+            try:
+                info = StockService.get_stock_info(symbol, market)
+                return {
+                    "symbol": symbol,
+                    "market": market,
+                    "name": info.get("name") or symbol,
+                    "current_price": info.get("current_price"),
+                    "price_change_percent": info.get("price_change_percent"),
+                    "prev_close": info.get("previous_price"),
+                    "volume": None, "amount": None,
+                    "turnover_rate": None, "volume_ratio": None,
+                    "inner_volume": None, "outer_volume": None,
+                    "timestamp": ts,
+                }
+            except Exception:
+                return {"symbol": symbol, "market": market, "error": "fetch failed"}
+
+        symbol = symbol.upper().strip()
+        secid_prefix = StockService._get_cn_secid_prefix(symbol)
+        try:
+            indicators = StockService._cn_quote_eastmoney_indicators(secid_prefix, symbol)
+            return {"symbol": symbol, "market": "CN", **indicators, "timestamp": ts}
+        except Exception:
+            return {"symbol": symbol, "market": "CN", "error": "fetch failed", "timestamp": ts}
+
+    @staticmethod
     def _get_yahoo_stock_info(symbol: str, market: str = "US") -> dict:
         """Fetch US/HK/KR stock info via Yahoo Finance."""
         full_symbol = StockService._format_symbol(symbol, market)
