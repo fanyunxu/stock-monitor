@@ -208,6 +208,16 @@ def get_mib_index():
     return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/FTSEMIB.MI", "意大利MIB")
 
 
+@app.get("/api/dji_index")
+def get_dji_index():
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EDJI", "道琼斯")
+
+
+@app.get("/api/ixic_index")
+def get_ixic_index():
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC", "纳斯达克")
+
+
 
 @app.get("/", include_in_schema=False)
 def root(request: Request):

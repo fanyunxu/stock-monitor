@@ -34,6 +34,8 @@
     <div class="idx-item"><span class="idx-name">法国CAC40</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
     <div class="idx-item"><span class="idx-name">德国DAX30</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
     <div class="idx-item"><span class="idx-name">意大利MIB</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">道琼斯</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">纳斯达克</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
   </div>
   <div class="meta" id="meta">
     <span>⏱ <span id="lastRefresh">—</span></span>
@@ -55,7 +57,7 @@ function fmtTime(date) {
 
 async function loadIndices() {
   try {
-    const [shR, kcR, krR, nkR, ftR, caR, dxR, miR] = await Promise.all([
+    const [shR, kcR, krR, nkR, ftR, caR, dxR, miR, djR, ixR] = await Promise.all([
       fetch(`${API}/market/index`).then(r => r.json()),
       fetch(`${API}/kechuang_index`).then(r => r.json()),
       fetch(`${API}/korea_index`).then(r => r.json()),
@@ -64,6 +66,8 @@ async function loadIndices() {
       fetch(`${API}/cac40_index`).then(r => r.json()),
       fetch(`${API}/dax30_index`).then(r => r.json()),
       fetch(`${API}/mib_index`).then(r => r.json()),
+      fetch(`${API}/dji_index`).then(r => r.json()),
+      fetch(`${API}/ixic_index`).then(r => r.json()),
     ])
 
     const container = document.getElementById('indices')
@@ -103,6 +107,8 @@ async function loadIndices() {
     fmtIdx(items[5], caR, '法国CAC40')
     fmtIdx(items[6], dxR, '德国DAX30')
     fmtIdx(items[7], miR, '意大利MIB')
+    fmtIdx(items[8], djR, '道琼斯')
+    fmtIdx(items[9], ixR, '纳斯达克')
   } catch (e) {
     // silently fail, indices are non-critical
   }
