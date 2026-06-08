@@ -154,6 +154,7 @@ app.include_router(etf.router)
 app.include_router(stocks.router)
 app.include_router(ai.router)
 app.include_router(ttrade.router)
+app.include_router(system.router)
 
 
 @app.get("/api/korea_index")
@@ -172,6 +173,26 @@ def get_korea_index():
         prev = result["meta"]["chartPreviousClose"]
         change = (price - prev) / prev * 100
         return {"name": "韩国KOSPI", "price": price, "change": change}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/nikkei_index")
+def get_nikkei_index():
+    """Get Nikkei 225 index via Yahoo Finance (bypasses CORS)."""
+    try:
+        import requests
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EN225"
+        params = {"interval": "1d", "range": "2d"}
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        result = data["chart"]["result"][0]
+        price = result["meta"]["regularMarketPrice"]
+        prev = result["meta"]["chartPreviousClose"]
+        change = (price - prev) / prev * 100
+        return {"name": "日经225", "price": price, "change": change}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
