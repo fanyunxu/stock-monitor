@@ -157,44 +157,55 @@ app.include_router(ttrade.router)
 app.include_router(system.router)
 
 
-@app.get("/api/korea_index")
-def get_korea_index():
-    """Get Korea KOSPI index via Yahoo Finance (bypasses CORS)."""
+def _fetch_yahoo_index(url: str, name: str):
+    """Fetch an international index quote from Yahoo Finance (bypasses CORS)."""
     try:
         import requests
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11"
-        params = {"interval": "1d", "range": "2d"}
+        params = {"interval": "1d", "range": "5d"}
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, params=params, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
         result = data["chart"]["result"][0]
         price = result["meta"]["regularMarketPrice"]
-        prev = result["meta"]["chartPreviousClose"]
+        # Use the prior trading session's close from the chart series —
+        # chartPreviousClose is unreliable when range is short.
+        closes = [c for c in result["indicators"]["quote"][0].get("close", []) if c is not None]
+        prev = closes[-2] if len(closes) >= 2 else result["meta"].get("chartPreviousClose", price)
         change = (price - prev) / prev * 100
-        return {"name": "韩国KOSPI", "price": price, "change": change}
+        return {"name": name, "price": price, "change": change}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/korea_index")
+def get_korea_index():
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11", "韩国KOSPI")
 
 
 @app.get("/api/nikkei_index")
 def get_nikkei_index():
-    """Get Nikkei 225 index via Yahoo Finance (bypasses CORS)."""
-    try:
-        import requests
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EN225"
-        params = {"interval": "1d", "range": "2d"}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, params=params, headers=headers, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        result = data["chart"]["result"][0]
-        price = result["meta"]["regularMarketPrice"]
-        prev = result["meta"]["chartPreviousClose"]
-        change = (price - prev) / prev * 100
-        return {"name": "日经225", "price": price, "change": change}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EN225", "日经225")
+
+
+@app.get("/api/ftse100_index")
+def get_ftse100_index():
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EFTSE", "英国富时100")
+
+
+@app.get("/api/cac40_index")
+def get_cac40_index():
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EFCHI", "法国CAC40")
+
+
+@app.get("/api/dax30_index")
+def get_dax30_index():
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EGDAXI", "德国DAX30")
+
+
+@app.get("/api/mib_index")
+def get_mib_index():
+    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/FTSEMIB.MI", "意大利MIB")
 
 
 

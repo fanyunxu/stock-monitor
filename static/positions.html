@@ -30,6 +30,10 @@
     <div class="idx-item"><span class="idx-name">科创50</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
     <div class="idx-item"><span class="idx-name">韩国KOSPI</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
     <div class="idx-item"><span class="idx-name">日经225</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">英国富时100</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">法国CAC40</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">德国DAX30</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
+    <div class="idx-item"><span class="idx-name">意大利MIB</span><span class="idx-price">—</span><span class="idx-change">—</span></div>
   </div>
   <div class="meta" id="meta">
     <span>⏱ <span id="lastRefresh">—</span></span>
@@ -51,11 +55,15 @@ function fmtTime(date) {
 
 async function loadIndices() {
   try {
-    const [shR, kcR, krR, nkR] = await Promise.all([
+    const [shR, kcR, krR, nkR, ftR, caR, dxR, miR] = await Promise.all([
       fetch(`${API}/market/index`).then(r => r.json()),
       fetch(`${API}/kechuang_index`).then(r => r.json()),
       fetch(`${API}/korea_index`).then(r => r.json()),
       fetch(`${API}/nikkei_index`).then(r => r.json()),
+      fetch(`${API}/ftse100_index`).then(r => r.json()),
+      fetch(`${API}/cac40_index`).then(r => r.json()),
+      fetch(`${API}/dax30_index`).then(r => r.json()),
+      fetch(`${API}/mib_index`).then(r => r.json()),
     ])
 
     const container = document.getElementById('indices')
@@ -91,6 +99,10 @@ async function loadIndices() {
     fmtIdx(items[1], kcR, '科创50')
     fmtIdx(items[2], krR, '韩国KOSPI')
     fmtIdx(items[3], nkR, '日经225')
+    fmtIdx(items[4], ftR, '英国富时100')
+    fmtIdx(items[5], caR, '法国CAC40')
+    fmtIdx(items[6], dxR, '德国DAX30')
+    fmtIdx(items[7], miR, '意大利MIB')
   } catch (e) {
     // silently fail, indices are non-critical
   }
