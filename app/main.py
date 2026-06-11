@@ -167,25 +167,103 @@ def _fetch_yahoo_index(url: str, name: str):
         r.raise_for_status()
         data = r.json()
         result = data["chart"]["result"][0]
-        price = result["meta"]["regularMarketPrice"]
-        # Use the prior trading session's close from the chart series —
-        # chartPreviousClose is unreliable when range is short.
-        closes = [c for c in result["indicators"]["quote"][0].get("close", []) if c is not None]
-        prev = closes[-2] if len(closes) >= 2 else result["meta"].get("chartPreviousClose", price)
-        change = (price - prev) / prev * 100
-        return {"name": name, "price": price, "change": change}
+        meta = result["meta"]
+        price = meta["regularMarketPrice"]
+        change = meta.get("regularMarketChangePercent")
+        if change is None:
+            prev = meta.get("regularMarketPreviousClose")
+            change = (price - prev) / prev * 100 if prev else 0
+        return {"name": name, "price": price, "change": change, "source": "yahoo"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _eastmoney_scaled(value, scale):
+    if value in (None, "-"):
+        return None
+    return float(value) / (10 ** int(scale or 0))
+
+
+_EASTMONEY_INDEX_CACHE = {}
+
+
+def _fetch_eastmoney_index(secid: str, fallback_url: str, fallback_name: str):
+    """Fetch an overseas index quote from EastMoney, fallback to Yahoo Finance."""
+    try:
+        import requests
+        params = {
+            "secid": secid,
+            "fields": "f43,f57,f58,f60,f169,f170,f152",
+        }
+        headers = {
+            "Referer": "https://quote.eastmoney.com/",
+            "User-Agent": "Mozilla/5.0",
+        }
+        payload = None
+        last_error = None
+        for url in (
+            "https://push2.eastmoney.com/api/qt/stock/get",
+            "http://push2.eastmoney.com/api/qt/stock/get",
+        ):
+            try:
+                r = requests.get(url, params=params, headers=headers, timeout=10)
+                r.raise_for_status()
+                payload = r.json()
+                break
+            except Exception as exc:
+                last_error = exc
+        if payload is None:
+            raise last_error or ValueError("empty EastMoney quote")
+
+        data = payload.get("data") or {}
+        if payload.get("rc") != 0 or not data:
+            raise ValueError(payload.get("message") or "empty EastMoney quote")
+
+        scale = data.get("f152", 2)
+        price = _eastmoney_scaled(data.get("f43"), scale)
+        if price is None:
+            raise ValueError("missing EastMoney price")
+
+        change_amount = _eastmoney_scaled(data.get("f169"), scale)
+        prev_close = _eastmoney_scaled(data.get("f60"), scale)
+        if prev_close:
+            change = (price - prev_close) / prev_close * 100
+        else:
+            change = _eastmoney_scaled(data.get("f170"), 2)
+
+        result = {
+            "name": data.get("f58") or fallback_name,
+            "price": price,
+            "change": change or 0,
+            "change_amount": change_amount,
+            "prev_close": prev_close,
+            "source": "eastmoney",
+        }
+        _EASTMONEY_INDEX_CACHE[secid] = result
+        return result
+    except Exception:
+        cached = _EASTMONEY_INDEX_CACHE.get(secid)
+        if cached:
+            return {**cached, "source": "eastmoney_cache"}
+        return _fetch_yahoo_index(fallback_url, fallback_name)
+
+
 @app.get("/api/korea_index")
 def get_korea_index():
-    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11", "韩国KOSPI")
+    return _fetch_eastmoney_index(
+        "100.KS11",
+        "https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11",
+        "韩国KOSPI",
+    )
 
 
 @app.get("/api/nikkei_index")
 def get_nikkei_index():
-    return _fetch_yahoo_index("https://query1.finance.yahoo.com/v8/finance/chart/%5EN225", "日经225")
+    return _fetch_eastmoney_index(
+        "100.N225",
+        "https://query1.finance.yahoo.com/v8/finance/chart/%5EN225",
+        "日经225",
+    )
 
 
 @app.get("/api/ftse100_index")

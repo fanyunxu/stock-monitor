@@ -55,13 +55,71 @@ function fmtTime(date) {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function scaleEastMoneyValue(value, scale) {
+  if (value == null || value === '-') return null
+  return Number(value) / (10 ** Number(scale || 0))
+}
+
+function fetchEastMoneyIndex(secid) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `emIndex_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const script = document.createElement('script')
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error('EastMoney index request timeout'))
+    }, 8000)
+
+    function cleanup() {
+      clearTimeout(timer)
+      delete window[callbackName]
+      script.remove()
+    }
+
+    window[callbackName] = (payload) => {
+      cleanup()
+      const data = payload && payload.data
+      if (!data || payload.rc !== 0) {
+        reject(new Error('Invalid EastMoney index response'))
+        return
+      }
+
+      const scale = data.f152 || 2
+      const price = scaleEastMoneyValue(data.f43, scale)
+      const prevClose = scaleEastMoneyValue(data.f60, scale)
+      if (price == null) {
+        reject(new Error('Missing EastMoney index price'))
+        return
+      }
+
+      const change = prevClose ? ((price - prevClose) / prevClose * 100) : scaleEastMoneyValue(data.f170, 2)
+      resolve({
+        name: data.f58,
+        price,
+        change: change || 0
+      })
+    }
+
+    const fields = 'f43,f57,f58,f60,f169,f170,f152'
+    script.src = `http://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(secid)}&fields=${fields}&cb=${callbackName}`
+    script.onerror = () => {
+      cleanup()
+      reject(new Error('EastMoney index request failed'))
+    }
+    document.head.appendChild(script)
+  })
+}
+
+function fetchIndexWithFallback(secid, fallbackPath) {
+  return fetchEastMoneyIndex(secid).catch(() => fetch(`${API}${fallbackPath}`).then(r => r.json()))
+}
+
 async function loadIndices() {
   try {
     const [shR, kcR, krR, nkR, ftR, caR, dxR, miR, djR, ixR] = await Promise.all([
       fetch(`${API}/market/index`).then(r => r.json()),
       fetch(`${API}/kechuang_index`).then(r => r.json()),
-      fetch(`${API}/korea_index`).then(r => r.json()),
-      fetch(`${API}/nikkei_index`).then(r => r.json()),
+      fetchIndexWithFallback('100.KS11', '/korea_index'),
+      fetchIndexWithFallback('100.N225', '/nikkei_index'),
       fetch(`${API}/ftse100_index`).then(r => r.json()),
       fetch(`${API}/cac40_index`).then(r => r.json()),
       fetch(`${API}/dax30_index`).then(r => r.json()),

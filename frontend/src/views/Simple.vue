@@ -40,13 +40,71 @@ function goIdea() {
   window.location.href = '/idea'
 }
 
+function scaleEastMoneyValue(value, scale) {
+  if (value == null || value === '-') return null
+  return Number(value) / (10 ** Number(scale || 0))
+}
+
+function fetchEastMoneyIndex(secid) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `emIndex_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const script = document.createElement('script')
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error('EastMoney index request timeout'))
+    }, 8000)
+
+    function cleanup() {
+      clearTimeout(timer)
+      delete window[callbackName]
+      script.remove()
+    }
+
+    window[callbackName] = (payload) => {
+      cleanup()
+      const data = payload && payload.data
+      if (!data || payload.rc !== 0) {
+        reject(new Error('Invalid EastMoney index response'))
+        return
+      }
+
+      const scale = data.f152 || 2
+      const price = scaleEastMoneyValue(data.f43, scale)
+      const prevClose = scaleEastMoneyValue(data.f60, scale)
+      if (price == null) {
+        reject(new Error('Missing EastMoney index price'))
+        return
+      }
+
+      const change = prevClose ? ((price - prevClose) / prevClose * 100) : scaleEastMoneyValue(data.f170, 2)
+      resolve({
+        name: data.f58,
+        price,
+        change: change || 0
+      })
+    }
+
+    const fields = 'f43,f57,f58,f60,f169,f170,f152'
+    script.src = `http://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(secid)}&fields=${fields}&cb=${callbackName}`
+    script.onerror = () => {
+      cleanup()
+      reject(new Error('EastMoney index request failed'))
+    }
+    document.head.appendChild(script)
+  })
+}
+
 async function fetchKoreaIndex() {
   try {
-    const r = await fetch(`${API}/korea_index`)
-    if (!r.ok) throw new Error(r.statusText)
-    return await r.json()
+    return await fetchEastMoneyIndex('100.KS11')
   } catch {
-    return null
+    try {
+      const r = await fetch(`${API}/korea_index`)
+      if (!r.ok) throw new Error(r.statusText)
+      return await r.json()
+    } catch {
+      return null
+    }
   }
 }
 
